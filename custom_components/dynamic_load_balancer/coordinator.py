@@ -17,6 +17,7 @@ from .const import (
     CONF_DEVICES_TO_TOGGLE,
     CONF_ENABLED_PHASES,
     CONF_FUSE_SIZE,
+    CONF_NOTIFY_TARGET,
     CONF_PHASE_1_SENSOR,
     CONF_PHASE_2_SENSOR,
     CONF_PHASE_3_SENSOR,
@@ -65,6 +66,12 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         self.disabled_devices: set[str] = set()
         self.restore_headroom_since: Any = None  # When sufficient headroom was first seen
         self.last_restore_step_time: Any = None  # When the last restoration step was taken
+
+        # Last overload event — stored for the sensor and for deduplicating notifications
+        self.last_triggered_time: Any = None
+        self.last_triggered_phases: list[int] = []
+        self.last_triggered_peak: float | None = None
+        self.last_triggered_threshold: float | None = None
 
         # Overall state
         self.is_managing_load = False
@@ -122,6 +129,21 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         is_enabled = self.enabled
 
         if sustained_overloads and is_enabled:
+            # Detect the moment an overload event begins (transition into managing state)
+            new_event = not self.is_managing_load
+            if new_event:
+                peak_current = max(
+                    (phase_currents[p] for p in sustained_overloads if phase_currents.get(p) is not None),
+                    default=0.0,
+                )
+                self.last_triggered_time = dt_util.utcnow()
+                self.last_triggered_phases = list(sustained_overloads)
+                self.last_triggered_peak = peak_current
+                self.last_triggered_threshold = trigger_current
+                await self._send_overload_notification(
+                    sustained_overloads, phase_currents, trigger_current, peak_current
+                )
+
             # Active overload: reduce load and reset restoration tracking
             await self._reduce_load(sustained_overloads, phase_currents, trigger_current)
             self.is_managing_load = True
@@ -154,6 +176,10 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             "disabled_devices": list(self.disabled_devices),
             "restore_headroom_since": self.restore_headroom_since,
             "last_restore_step_time": self.last_restore_step_time,
+            # Last overload event — consumed by the sensor
+            "last_overloaded_phases": self.last_triggered_phases,
+            "last_peak_current": self.last_triggered_peak,
+            "trigger_current_at_event": self.last_triggered_threshold,
         }
 
     # ── Sensor reading ────────────────────────────────────────────────────────
@@ -201,6 +227,67 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             if current is not None:
                 min_headroom = min(min_headroom, trigger_current - current)
         return min_headroom if min_headroom != float("inf") else 0.0
+
+    # ── Notifications ─────────────────────────────────────────────────────────
+
+    async def _send_overload_notification(
+        self,
+        overloaded_phases: list[int],
+        phase_currents: dict[int, float | None],
+        trigger_current: float,
+        peak_current: float,
+    ) -> None:
+        """Send an overload notification via persistent_notification and optionally a mobile device."""
+        fuse_size = self.config[CONF_FUSE_SIZE]
+
+        # Build a readable phase summary, e.g. "L1: 24.3 A, L2: 23.1 A"
+        phase_parts = []
+        for phase in overloaded_phases:
+            current = phase_currents.get(phase)
+            if current is not None:
+                phase_parts.append(f"L{phase}: {current:.1f} A")
+        phase_summary = ", ".join(phase_parts) if phase_parts else f"phase(s) {overloaded_phases}"
+
+        title = "⚡ Electrical Overload Detected"
+        message = (
+            f"Overload on {phase_summary}. "
+            f"Peak: {peak_current:.1f} A — trigger threshold: {trigger_current:.1f} A "
+            f"({fuse_size} A fuse). "
+            f"Dynamic Load Balancer is reducing load."
+        )
+
+        # 1. Always create a persistent HA notification (visible as a bell icon in HA)
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": title,
+                    "message": message,
+                    "notification_id": f"{DOMAIN}_overload",
+                },
+                blocking=False,
+            )
+        except Exception as exc:
+            _LOGGER.error("Failed to create persistent notification: %s", exc)
+
+        # 2. Optionally send to a configured mobile device
+        notify_target = self.config.get(CONF_NOTIFY_TARGET, "").strip()
+        if notify_target:
+            # Accept both "mobile_app_phone" and "notify.mobile_app_phone"
+            service = notify_target.removeprefix("notify.")
+            try:
+                await self.hass.services.async_call(
+                    "notify",
+                    service,
+                    {"title": title, "message": message},
+                    blocking=False,
+                )
+                _LOGGER.info("Overload notification sent to notify.%s", service)
+            except Exception as exc:
+                _LOGGER.error(
+                    "Failed to send notification to notify.%s: %s", service, exc
+                )
 
     # ── Load reduction ────────────────────────────────────────────────────────
 

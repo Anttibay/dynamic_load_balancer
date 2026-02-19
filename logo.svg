@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1565C0"/>
+      <stop offset="100%" stop-color="#0A3D8F"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="256" height="256" rx="52" fill="url(#bg)"/>
+
+  <!-- Three phase bar tracks (dark inset) -->
+  <rect x="34"  y="46" width="50" height="148" rx="10" fill="#0D3580" opacity="0.7"/>
+  <rect x="103" y="46" width="50" height="148" rx="10" fill="#0D3580" opacity="0.7"/>
+  <rect x="172" y="46" width="50" height="148" rx="10" fill="#0D3580" opacity="0.7"/>
+
+  <!-- L1: overloaded — full red bar -->
+  <rect x="34"  y="46"  width="50" height="148" rx="10" fill="#EF5350"/>
+
+  <!-- L2: elevated — amber bar at ~60% -->
+  <rect x="103" y="105" width="50" height="89"  rx="10" fill="#FFA726"/>
+
+  <!-- L3: normal — green bar at ~35% -->
+  <rect x="172" y="142" width="50" height="52"  rx="10" fill="#66BB6A"/>
+
+  <!-- Phase labels -->
+  <text x="59"  y="216" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="white" text-anchor="middle" opacity="0.95">L1</text>
+  <text x="128" y="216" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="white" text-anchor="middle" opacity="0.95">L2</text>
+  <text x="197" y="216" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="bold" fill="white" text-anchor="middle" opacity="0.95">L3</text>
+
+  <!-- Lightning bolt overlay -->
+  <path d="M152 18 L120 108 L140 108 L126 152 L170 62 L150 62 Z"
+        fill="#FFD600" stroke="#E65100" stroke-width="1.5"
+        stroke-linejoin="round" filter="url(#shadow)"/>
+</svg>

@@ -12,6 +12,7 @@ CONF_AGGRESSIVENESS = "aggressiveness"
 CONF_SPIKE_FILTER_TIME = "spike_filter_time"
 CONF_CHARGING_ENTITY = "charging_entity"
 CONF_DEVICES_TO_TOGGLE = "devices_to_toggle"
+CONF_NOTIFY_TARGET = "notify_target"
 
 # Default values
 DEFAULT_FUSE_SIZE = 25

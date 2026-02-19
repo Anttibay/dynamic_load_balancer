@@ -40,15 +40,17 @@
         }
       },
       "actions": {
-        "title": "Load Reduction Actions",
-        "description": "Define what the load balancer does when a sustained overload is detected. Actions are applied in order — charging is throttled first, and devices are toggled off only if the overload persists.\n\n**EV / Charging Control:** Select a `number` entity that controls charging current (e.g. a Tesla Wall Connector, Wallbox, or EVSE ampere slider). The integration reads the entity's `min`, `max`, and `step` attributes and will step down the charging current during overload, then gradually restore it once load is clear.\n\n**Devices to Toggle Off:** These devices are turned off if throttling the charger alone is not enough. They are restored automatically when the overload clears. Good candidates: water heaters, non-critical climate units, or any high-wattage load that can tolerate brief interruptions.\n\nBoth fields are optional — you can use one or both.",
+        "title": "Load Reduction & Notifications",
+        "description": "Define what the load balancer does when a sustained overload is detected. Actions are applied in order — charging is throttled first, and devices are toggled off only if the overload persists.\n\n**EV / Charging Control:** Select a `number` entity that controls charging current (e.g. a Tesla Wall Connector, Wallbox, or EVSE ampere slider). The integration reads the entity's `min`, `max`, and `step` attributes and will step down the charging current during overload, then gradually restore it once load is clear.\n\n**Devices to Toggle Off:** These devices are turned off if throttling the charger alone is not enough. They are restored automatically when the overload clears.\n\n**Notification Device:** When an overload is detected, a notification is always posted in the Home Assistant dashboard. Optionally enter a **notify service name** to also push an alert to your phone (e.g. `mobile_app_johns_iphone`). Find available service names under Developer Tools → Services → search \"notify\".",
         "data": {
           "charging_entity": "EV / Charging Current Control",
-          "devices_to_toggle": "Devices to Turn Off During Overload"
+          "devices_to_toggle": "Devices to Turn Off During Overload",
+          "notify_target": "Mobile Notification Device (optional)"
         },
         "data_description": {
-          "charging_entity": "A `number` entity that sets the charging current in Amperes. The integration will reduce this value during overloads and restore it afterwards. Works with any EVSE that exposes a current-control number entity.",
-          "devices_to_toggle": "These entities will be turned off when reducing charging current is not sufficient to clear the overload. They are turned back on automatically once all phases are back below the threshold."
+          "charging_entity": "A `number` entity that sets the charging current in Amperes. Works with any EVSE that exposes a current-control number entity.",
+          "devices_to_toggle": "These entities will be turned off when reducing charging current is not sufficient to clear the overload. They are turned back on automatically once all phases are back below the threshold.",
+          "notify_target": "The name of the notify service for your phone, e.g. `mobile_app_johns_iphone`. Leave blank to receive only the Home Assistant dashboard notification. You can find your device name in Developer Tools → Services → type \"notify.\" to see available devices."
         }
       }
     }
@@ -61,12 +63,14 @@
         "data": {
           "fuse_size": "Per-Phase Fuse / Breaker Size (A)",
           "aggressiveness": "Aggressiveness",
-          "spike_filter_time": "Spike Filter Duration (seconds)"
+          "spike_filter_time": "Spike Filter Duration (seconds)",
+          "notify_target": "Mobile Notification Device (optional)"
         },
         "data_description": {
           "fuse_size": "The ampere rating of your per-phase circuit breaker.",
           "aggressiveness": "Higher aggressiveness triggers load reduction earlier (lower threshold).",
-          "spike_filter_time": "Seconds the overload must persist before any action is taken."
+          "spike_filter_time": "Seconds the overload must persist before any action is taken.",
+          "notify_target": "Notify service name for push notifications, e.g. `mobile_app_johns_iphone`. Leave blank to use only the HA dashboard notification."
         }
       }
     }

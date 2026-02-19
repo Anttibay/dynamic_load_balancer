@@ -18,6 +18,9 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from .const import (
@@ -27,6 +30,7 @@ from .const import (
     CONF_DEVICES_TO_TOGGLE,
     CONF_ENABLED_PHASES,
     CONF_FUSE_SIZE,
+    CONF_NOTIFY_TARGET,
     CONF_PHASE_1_SENSOR,
     CONF_PHASE_2_SENSOR,
     CONF_PHASE_3_SENSOR,
@@ -201,6 +205,9 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         multiple=True,
                     )
                 ),
+                vol.Optional(CONF_NOTIFY_TARGET): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.TEXT)
+                ),
             }
         )
 
@@ -274,6 +281,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         unit_of_measurement="seconds",
                         mode=NumberSelectorMode.BOX,
                     )
+                ),
+                vol.Optional(
+                    CONF_NOTIFY_TARGET,
+                    default=current_config.get(CONF_NOTIFY_TARGET, ""),
+                ): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.TEXT)
                 ),
             }
         )
