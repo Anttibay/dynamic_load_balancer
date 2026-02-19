@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dynamic Load Balancer Setup",
+        "description": "Configure your electrical panel capacity",
+        "data": {
+          "fuse_size": "Fuse/Breaker Size (A)"
+        }
+      },
+      "phases": {
+        "title": "Phase Configuration",
+        "description": "Select current sensors for each phase you want to monitor",
+        "data": {
+          "phase_1_sensor": "Phase 1 Current Sensor",
+          "phase_2_sensor": "Phase 2 Current Sensor",
+          "phase_3_sensor": "Phase 3 Current Sensor",
+          "enabled_phases": "Monitor These Phases"
+        }
+      },
+      "behavior": {
+        "title": "Load Balancing Behavior",
+        "description": "Configure how the load balancer reacts to overloads",
+        "data": {
+          "aggressiveness": "Aggressiveness Level",
+          "spike_filter_time": "Spike Filter Duration (seconds)"
+        }
+      },
+      "actions": {
+        "title": "Load Reduction Actions",
+        "description": "Select devices to control during overload",
+        "data": {
+          "charging_entity": "Charging Current Control (any number entity)",
+          "devices_to_toggle": "Devices to Toggle Off"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Load Balancer Settings",
+        "data": {
+          "fuse_size": "Fuse/Breaker Size (A)",
+          "aggressiveness": "Aggressiveness Level",
+          "spike_filter_time": "Spike Filter Duration (seconds)"
+        }
+      }
+    }
+  }
+}

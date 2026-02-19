@@ -1,0 +1,12 @@
+{
+  "domain": "dynamic_load_balancer",
+  "name": "Dynamic Load Balancer",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/yourusername/dynamic_load_balancer",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "1.1.0"
+}
