@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     AGGRESSIVENESS_LEVELS,
@@ -38,11 +39,12 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=5),
         )
         self.entry = entry
-        self.config = entry.data
+        # Merge base data with any user-saved options (options take precedence)
+        self.config = {**entry.data, **entry.options}
         
         # Overload tracking per phase
-        self.overload_start: dict[int, datetime | None] = {1: None, 2: None, 3: None}
-        self.last_action_time: datetime | None = None
+        self.overload_start: dict[int, Any] = {1: None, 2: None, 3: None}
+        self.last_action_time: Any = None
         self.charging_original_value: float | None = None
         self.disabled_devices: set[str] = set()
         
@@ -71,7 +73,7 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                     
                     # Track overload duration
                     if self.overload_start[phase] is None:
-                        self.overload_start[phase] = datetime.now()
+                        self.overload_start[phase] = dt_util.utcnow()
                         _LOGGER.info(f"Phase {phase} overload started: {current:.1f}A > {trigger_current:.1f}A")
                 else:
                     # Reset overload tracking if below threshold
@@ -85,7 +87,7 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         
         for phase in overloaded_phases:
             if self.overload_start[phase] is not None:
-                duration = (datetime.now() - self.overload_start[phase]).total_seconds()
+                duration = (dt_util.utcnow() - self.overload_start[phase]).total_seconds()
                 _LOGGER.debug(f"Phase {phase} overload duration: {duration:.1f}s / {spike_filter_seconds}s")
                 if duration >= spike_filter_seconds:
                     sustained_overloads.append(phase)
@@ -96,7 +98,7 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         
         # Manage load if sustained overload detected AND switch is enabled
         if sustained_overloads and is_enabled:
-            await self._reduce_load(sustained_overloads, phase_currents, fuse_size)
+            await self._reduce_load(sustained_overloads, phase_currents, trigger_current)
             self.is_managing_load = True
         elif not overloaded_phases and self.is_managing_load:
             # Restore load when no overloads
@@ -141,34 +143,34 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         self,
         overloaded_phases: list[int],
         phase_currents: dict[int, float | None],
-        fuse_size: int,
+        trigger_current: float,
     ) -> None:
-        """Reduce electrical load by adjusting Tesla charging and toggling devices."""
+        """Reduce electrical load by adjusting charging current and toggling devices."""
         # Prevent too frequent actions
         if self.last_action_time:
-            time_since_last = (datetime.now() - self.last_action_time).total_seconds()
+            time_since_last = (dt_util.utcnow() - self.last_action_time).total_seconds()
             if time_since_last < 10:  # Minimum 10 seconds between actions
                 return
-        
-        # Calculate total overload
-        total_overload = 0
+
+        # Calculate how much each phase exceeds the trigger threshold
+        total_overload = 0.0
         for phase in overloaded_phases:
             if phase in phase_currents and phase_currents[phase] is not None:
-                overload = phase_currents[phase] - fuse_size
+                overload = phase_currents[phase] - trigger_current
                 total_overload = max(total_overload, overload)
-        
+
         _LOGGER.info(
             f"Overload detected on phases {overloaded_phases}. "
-            f"Maximum overload: {total_overload:.1f}A. Taking action..."
+            f"Maximum overload above trigger: {total_overload:.1f}A. Taking action..."
         )
-        
+
         # Step 1: Reduce charging current
         charging_entity = self.config.get(CONF_CHARGING_ENTITY)
         if charging_entity and total_overload > 0:
             reduction = await self._reduce_charging_current(charging_entity, total_overload)
             total_overload -= reduction
-            _LOGGER.info(f"Reduced charging current by {reduction}A")
-        
+            _LOGGER.info(f"Reduced charging current by {reduction:.1f}A")
+
         # Step 2: Toggle off devices if still overloaded
         if total_overload > 0:
             devices = self.config.get(CONF_DEVICES_TO_TOGGLE, [])
@@ -177,7 +179,6 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                 if device not in self.disabled_devices:
                     state = self.hass.states.get(device)
                     if state and state.state == "on":
-                        _LOGGER.info(f"Turning off device: {device}")
                         try:
                             await self.hass.services.async_call(
                                 "homeassistant",
@@ -186,21 +187,17 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                                 blocking=True,
                             )
                             self.disabled_devices.add(device)
-                            _LOGGER.info(f"✅ Successfully turned off: {device}")
+                            _LOGGER.info(f"Turned off device: {device}")
+                            # Rough estimate: assume 5A load reduction per device
+                            total_overload -= 5
+                            if total_overload <= 0:
+                                break
                         except Exception as e:
                             _LOGGER.error(f"Failed to turn off {device}: {e}")
                     else:
-                        _LOGGER.debug(f"Device {device} is already off or unavailable")
-                        _LOGGER.info(f"Turned off device: {device}")
-                        
-                        # Assume each device reduces load by some amount
-                        # In reality, you might want to track actual consumption
-                        total_overload -= 5  # Rough estimate
-                        
-                        if total_overload <= 0:
-                            break
-        
-        self.last_action_time = datetime.now()
+                        _LOGGER.debug(f"Device {device} is already off or unavailable, skipping")
+
+        self.last_action_time = dt_util.utcnow()
 
     async def _reduce_charging_current(self, entity_id: str, overload_amps: float) -> float:
         """Reduce charging current and return amount reduced.
@@ -298,13 +295,16 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         
         # Re-enable disabled devices
         for device in list(self.disabled_devices):
-            await self.hass.services.async_call(
-                "homeassistant",
-                "turn_on",
-                {"entity_id": device},
-                blocking=True,
-            )
-            _LOGGER.info(f"Restored device: {device}")
+            try:
+                await self.hass.services.async_call(
+                    "homeassistant",
+                    "turn_on",
+                    {"entity_id": device},
+                    blocking=True,
+                )
+                _LOGGER.info(f"Restored device: {device}")
+            except Exception as e:
+                _LOGGER.error(f"Failed to restore device {device}: {e}")
         
         self.disabled_devices.clear()
-        self.last_action_time = datetime.now()
+        self.last_action_time = dt_util.utcnow()

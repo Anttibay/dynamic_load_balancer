@@ -2,36 +2,53 @@
   "config": {
     "step": {
       "user": {
-        "title": "Dynamic Load Balancer Setup",
-        "description": "Configure your electrical panel capacity",
+        "title": "Electrical Panel Capacity",
+        "description": "Enter the **per-phase fuse or breaker size** for your electrical panel in Amperes.\n\nThis is the maximum current each phase can carry before the breaker trips. You can usually find this labelled on the main breaker inside your electrical panel (e.g. 25 A, 32 A, 63 A).\n\n**Tip:** For three-phase systems, enter the per-phase rating — not the total across all phases.",
         "data": {
-          "fuse_size": "Fuse/Breaker Size (A)"
+          "fuse_size": "Per-Phase Fuse / Breaker Size (A)"
+        },
+        "data_description": {
+          "fuse_size": "The ampere rating printed on your main circuit breaker for a single phase. Common values: 16 A, 20 A, 25 A, 32 A, 40 A, 63 A."
         }
       },
       "phases": {
-        "title": "Phase Configuration",
-        "description": "Select current sensors for each phase you want to monitor",
+        "title": "Current Sensors",
+        "description": "Assign a **current sensor** (measuring Amperes) to each phase you want to monitor. These are provided by energy monitors such as a Shelly EM, Eastron SDM, or a smart meter integration.\n\nOnly assign sensors to phases that actually exist in your installation. The **Monitor These Phases** checkboxes below control which assigned phases are actively watched — uncheck a phase to temporarily disable it without removing its sensor.",
         "data": {
-          "phase_1_sensor": "Phase 1 Current Sensor",
-          "phase_2_sensor": "Phase 2 Current Sensor",
-          "phase_3_sensor": "Phase 3 Current Sensor",
+          "phase_1_sensor": "Phase 1 — Current Sensor",
+          "phase_2_sensor": "Phase 2 — Current Sensor",
+          "phase_3_sensor": "Phase 3 — Current Sensor",
           "enabled_phases": "Monitor These Phases"
+        },
+        "data_description": {
+          "phase_1_sensor": "A sensor entity whose state is the current draw in Amperes for phase L1.",
+          "phase_2_sensor": "A sensor entity whose state is the current draw in Amperes for phase L2.",
+          "phase_3_sensor": "A sensor entity whose state is the current draw in Amperes for phase L3.",
+          "enabled_phases": "Select which phases should trigger load-reduction actions. Deselect a phase if you have no sensor for it, or if you want to monitor it passively without taking action."
         }
       },
       "behavior": {
-        "title": "Load Balancing Behavior",
-        "description": "Configure how the load balancer reacts to overloads",
+        "title": "Reaction Behavior",
+        "description": "Control **when** and **how quickly** the load balancer reacts to overloads.\n\n**Aggressiveness** sets the trigger threshold as a percentage of your fuse capacity:\n- **Low (95%)** — triggers at {low_trigger} A — acts only when very close to the limit\n- **Medium (90%)** — triggers at {medium_trigger} A — balanced, recommended for most homes\n- **High (85%)** — triggers at {high_trigger} A — acts early, gives more headroom\n- **Very High (80%)** — triggers at {very_high_trigger} A — most conservative, most protective\n\n**Spike Filter** prevents the balancer from reacting to short-lived current spikes (e.g. motor startups, microwave ovens). The overload must be sustained for at least this many seconds before any action is taken. Recommended: 20–30 s.",
         "data": {
-          "aggressiveness": "Aggressiveness Level",
+          "aggressiveness": "Aggressiveness",
           "spike_filter_time": "Spike Filter Duration (seconds)"
+        },
+        "data_description": {
+          "aggressiveness": "Higher aggressiveness = lower trigger threshold = earlier intervention = more safety margin.",
+          "spike_filter_time": "Minimum number of seconds a phase must remain overloaded before any load-reduction action is triggered. Prevents false reactions to momentary current spikes."
         }
       },
       "actions": {
         "title": "Load Reduction Actions",
-        "description": "Select devices to control during overload",
+        "description": "Define what the load balancer does when a sustained overload is detected. Actions are applied in order — charging is throttled first, and devices are toggled off only if the overload persists.\n\n**EV / Charging Control:** Select a `number` entity that controls charging current (e.g. a Tesla Wall Connector, Wallbox, or EVSE ampere slider). The integration reads the entity's `min`, `max`, and `step` attributes and will step down the charging current during overload, then gradually restore it once load is clear.\n\n**Devices to Toggle Off:** These devices are turned off if throttling the charger alone is not enough. They are restored automatically when the overload clears. Good candidates: water heaters, non-critical climate units, or any high-wattage load that can tolerate brief interruptions.\n\nBoth fields are optional — you can use one or both.",
         "data": {
-          "charging_entity": "Charging Current Control (any number entity)",
-          "devices_to_toggle": "Devices to Toggle Off"
+          "charging_entity": "EV / Charging Current Control",
+          "devices_to_toggle": "Devices to Turn Off During Overload"
+        },
+        "data_description": {
+          "charging_entity": "A `number` entity that sets the charging current in Amperes. The integration will reduce this value during overloads and restore it afterwards. Works with any EVSE that exposes a current-control number entity.",
+          "devices_to_toggle": "These entities will be turned off when reducing charging current is not sufficient to clear the overload. They are turned back on automatically once all phases are back below the threshold."
         }
       }
     }
@@ -40,10 +57,16 @@
     "step": {
       "init": {
         "title": "Update Load Balancer Settings",
+        "description": "Adjust the core parameters without re-running the full setup wizard. Sensor and device assignments can only be changed by removing and re-adding the integration.",
         "data": {
-          "fuse_size": "Fuse/Breaker Size (A)",
-          "aggressiveness": "Aggressiveness Level",
+          "fuse_size": "Per-Phase Fuse / Breaker Size (A)",
+          "aggressiveness": "Aggressiveness",
           "spike_filter_time": "Spike Filter Duration (seconds)"
+        },
+        "data_description": {
+          "fuse_size": "The ampere rating of your per-phase circuit breaker.",
+          "aggressiveness": "Higher aggressiveness triggers load reduction earlier (lower threshold).",
+          "spike_filter_time": "Seconds the overload must persist before any action is taken."
         }
       }
     }

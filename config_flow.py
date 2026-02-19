@@ -74,9 +74,6 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={
-                "info": "Enter the fuse/breaker size for your electrical panel"
-            },
         )
 
     async def async_step_phases(
@@ -116,9 +113,6 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="phases",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={
-                "info": "Select sensor entities that measure current (Ampere) for each phase. Only select sensors for phases you want to monitor."
-            },
         )
 
     async def async_step_behavior(
@@ -160,12 +154,17 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
+        fuse = self._fuse_size
         return self.async_show_form(
             step_id="behavior",
             data_schema=data_schema,
             errors=errors,
             description_placeholders={
-                "info": "Configure how aggressively the load balancer should react. Higher aggressiveness means it will start reducing load earlier. Spike filter prevents reactions to very short overloads."
+                "fuse_size": str(fuse),
+                "low_trigger": str(round(fuse * 0.95, 1)),
+                "medium_trigger": str(round(fuse * 0.90, 1)),
+                "high_trigger": str(round(fuse * 0.85, 1)),
+                "very_high_trigger": str(round(fuse * 0.80, 1)),
             },
         )
 
@@ -209,9 +208,6 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="actions",
             data_schema=data_schema,
             errors=errors,
-            description_placeholders={
-                "info": "Select a charging current control entity (e.g., Tesla, Wallbox, etc.) and/or devices to toggle off during overload. The integration will read min/max values from the entity. Leave empty to skip."
-            },
         )
 
     @staticmethod
