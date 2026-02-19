@@ -26,6 +26,18 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# How much headroom below the trigger threshold must exist before restoration begins.
+# e.g. if trigger is 22.5 A and this is 3.0, current must be <= 19.5 A on all phases.
+RESTORE_MIN_HEADROOM = 3.0   # Amperes
+
+# Headroom must be continuously observed for this many seconds before the first
+# restoration step is taken. Prevents restoring into a situation that just settled.
+RESTORE_SETTLE_SECS = 60     # seconds
+
+# Minimum wait between consecutive restoration steps (charger increment or device
+# re-enable). Gives the system time to observe the effect of each step.
+RESTORE_STEP_SECS = 60       # seconds
+
 
 class LoadBalancerCoordinator(DataUpdateCoordinator):
     """Class to manage load balancing."""
@@ -41,70 +53,96 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         self.entry = entry
         # Merge base data with any user-saved options (options take precedence)
         self.config = {**entry.data, **entry.options}
-        
+
         # Overload tracking per phase
         self.overload_start: dict[int, Any] = {1: None, 2: None, 3: None}
+
+        # Reduction rate limiting
         self.last_action_time: Any = None
+
+        # Restoration state
         self.charging_original_value: float | None = None
         self.disabled_devices: set[str] = set()
-        
-        # State tracking
+        self.restore_headroom_since: Any = None  # When sufficient headroom was first seen
+        self.last_restore_step_time: Any = None  # When the last restoration step was taken
+
+        # Overall state
         self.is_managing_load = False
         self.enabled = True  # Controlled by switch entity
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and manage load."""
         phase_currents = await self._get_phase_currents()
-        
+
         fuse_size = self.config[CONF_FUSE_SIZE]
         aggressiveness = self.config.get(CONF_AGGRESSIVENESS, "medium")
         threshold = AGGRESSIVENESS_LEVELS[aggressiveness]
         trigger_current = fuse_size * threshold
-        
+
         enabled_phases = [int(p) for p in self.config.get(CONF_ENABLED_PHASES, ["1", "2", "3"])]
-        
-        # Check for overloads on enabled phases
+
+        # ── Phase overload detection ──────────────────────────────────────────
         overloaded_phases = []
         for phase in enabled_phases:
             if phase in phase_currents:
                 current = phase_currents[phase]
                 if current is not None and current > trigger_current:
                     overloaded_phases.append(phase)
-                    
-                    # Track overload duration
                     if self.overload_start[phase] is None:
                         self.overload_start[phase] = dt_util.utcnow()
-                        _LOGGER.info(f"Phase {phase} overload started: {current:.1f}A > {trigger_current:.1f}A")
+                        _LOGGER.info(
+                            "Phase %d overload started: %.1fA > %.1fA",
+                            phase, current, trigger_current,
+                        )
                 else:
-                    # Reset overload tracking if below threshold
                     if self.overload_start[phase] is not None:
-                        _LOGGER.info(f"Phase {phase} overload cleared: {current:.1f}A <= {trigger_current:.1f}A")
+                        _LOGGER.info(
+                            "Phase %d overload cleared: %.1fA <= %.1fA",
+                            phase, current, trigger_current,
+                        )
                     self.overload_start[phase] = None
-        
-        # Apply spike filter - only act on sustained overloads
+
+        # Apply spike filter — only act on sustained overloads
         sustained_overloads = []
         spike_filter_seconds = self.config.get(CONF_SPIKE_FILTER_TIME, 30)
-        
         for phase in overloaded_phases:
             if self.overload_start[phase] is not None:
                 duration = (dt_util.utcnow() - self.overload_start[phase]).total_seconds()
-                _LOGGER.debug(f"Phase {phase} overload duration: {duration:.1f}s / {spike_filter_seconds}s")
+                _LOGGER.debug(
+                    "Phase %d overload duration: %.1fs / %ss",
+                    phase, duration, spike_filter_seconds,
+                )
                 if duration >= spike_filter_seconds:
                     sustained_overloads.append(phase)
-                    _LOGGER.warning(f"Phase {phase} sustained overload detected after {duration:.1f}s")
-        
-        # Check if load balancing is enabled
+                    _LOGGER.warning(
+                        "Phase %d sustained overload after %.1fs", phase, duration
+                    )
+
+        # ── Load management decision ──────────────────────────────────────────
         is_enabled = self.enabled
-        
-        # Manage load if sustained overload detected AND switch is enabled
+
         if sustained_overloads and is_enabled:
+            # Active overload: reduce load and reset restoration tracking
             await self._reduce_load(sustained_overloads, phase_currents, trigger_current)
             self.is_managing_load = True
-        elif not overloaded_phases and self.is_managing_load:
-            # Restore load when no overloads
-            await self._restore_load()
-            self.is_managing_load = False
-        
+            self.restore_headroom_since = None
+
+        elif is_enabled and (
+            self.is_managing_load
+            or self.disabled_devices
+            or self.charging_original_value is not None
+        ):
+            if overloaded_phases:
+                # Even a transient spike blocks restoration — reset the settle timer
+                _LOGGER.debug(
+                    "Transient overload on phase(s) %s — pausing restoration",
+                    overloaded_phases,
+                )
+                self.restore_headroom_since = None
+            else:
+                # No overload at all: check whether headroom is sufficient to restore
+                await self._maybe_restore_load(phase_currents, trigger_current, enabled_phases)
+
         return {
             "phase_currents": phase_currents,
             "overloaded_phases": overloaded_phases,
@@ -114,12 +152,15 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             "trigger_current": trigger_current,
             "charging_original_value": self.charging_original_value,
             "disabled_devices": list(self.disabled_devices),
+            "restore_headroom_since": self.restore_headroom_since,
+            "last_restore_step_time": self.last_restore_step_time,
         }
+
+    # ── Sensor reading ────────────────────────────────────────────────────────
 
     async def _get_phase_currents(self) -> dict[int, float | None]:
         """Get current readings from all phase sensors."""
-        currents = {}
-        
+        currents: dict[int, float | None] = {}
         for phase_num, conf_key in [
             (1, CONF_PHASE_1_SENSOR),
             (2, CONF_PHASE_2_SENSOR),
@@ -132,12 +173,36 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                     try:
                         currents[phase_num] = float(state.state)
                     except (ValueError, TypeError):
-                        _LOGGER.warning(f"Invalid current value for phase {phase_num}: {state.state}")
+                        _LOGGER.warning(
+                            "Invalid current value for phase %d: %s",
+                            phase_num, state.state,
+                        )
                         currents[phase_num] = None
                 else:
                     currents[phase_num] = None
-        
         return currents
+
+    # ── Headroom helper ───────────────────────────────────────────────────────
+
+    def _calculate_min_headroom(
+        self,
+        phase_currents: dict[int, float | None],
+        trigger_current: float,
+        enabled_phases: list[int],
+    ) -> float:
+        """Return the smallest headroom (trigger − current) across all enabled phases.
+
+        A positive value means all phases are below the trigger. The smaller the
+        number, the less room there is before the next overload.
+        """
+        min_headroom = float("inf")
+        for phase in enabled_phases:
+            current = phase_currents.get(phase)
+            if current is not None:
+                min_headroom = min(min_headroom, trigger_current - current)
+        return min_headroom if min_headroom != float("inf") else 0.0
+
+    # ── Load reduction ────────────────────────────────────────────────────────
 
     async def _reduce_load(
         self,
@@ -146,35 +211,38 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         trigger_current: float,
     ) -> None:
         """Reduce electrical load by adjusting charging current and toggling devices."""
-        # Prevent too frequent actions
+        # Rate-limit: minimum 10 s between reduction actions
         if self.last_action_time:
-            time_since_last = (dt_util.utcnow() - self.last_action_time).total_seconds()
-            if time_since_last < 10:  # Minimum 10 seconds between actions
+            elapsed = (dt_util.utcnow() - self.last_action_time).total_seconds()
+            if elapsed < 10:
                 return
 
-        # Calculate how much each phase exceeds the trigger threshold
+        # How much above the trigger threshold is the worst phase?
         total_overload = 0.0
         for phase in overloaded_phases:
-            if phase in phase_currents and phase_currents[phase] is not None:
-                overload = phase_currents[phase] - trigger_current
-                total_overload = max(total_overload, overload)
+            current = phase_currents.get(phase)
+            if current is not None:
+                total_overload = max(total_overload, current - trigger_current)
 
         _LOGGER.info(
-            f"Overload detected on phases {overloaded_phases}. "
-            f"Maximum overload above trigger: {total_overload:.1f}A. Taking action..."
+            "Overload on phase(s) %s — %.1fA above trigger. Taking action.",
+            overloaded_phases, total_overload,
         )
 
-        # Step 1: Reduce charging current
+        # Step 1: Reduce EV charging current first (fine-grained control)
         charging_entity = self.config.get(CONF_CHARGING_ENTITY)
         if charging_entity and total_overload > 0:
             reduction = await self._reduce_charging_current(charging_entity, total_overload)
             total_overload -= reduction
-            _LOGGER.info(f"Reduced charging current by {reduction:.1f}A")
+            _LOGGER.info("Reduced charging current by %.1fA", reduction)
 
         # Step 2: Toggle off devices if still overloaded
         if total_overload > 0:
             devices = self.config.get(CONF_DEVICES_TO_TOGGLE, [])
-            _LOGGER.info(f"Still overloaded by {total_overload:.1f}A, checking {len(devices)} devices")
+            _LOGGER.info(
+                "Still overloaded by %.1fA — checking %d device(s)",
+                total_overload, len(devices),
+            )
             for device in devices:
                 if device not in self.disabled_devices:
                     state = self.hass.states.get(device)
@@ -187,62 +255,64 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                                 blocking=True,
                             )
                             self.disabled_devices.add(device)
-                            _LOGGER.info(f"Turned off device: {device}")
-                            # Rough estimate: assume 5A load reduction per device
-                            total_overload -= 5
+                            _LOGGER.info("Turned off device: %s", device)
+                            total_overload -= 5  # rough estimate per device
                             if total_overload <= 0:
                                 break
                         except Exception as e:
-                            _LOGGER.error(f"Failed to turn off {device}: {e}")
+                            _LOGGER.error("Failed to turn off %s: %s", device, e)
                     else:
-                        _LOGGER.debug(f"Device {device} is already off or unavailable, skipping")
+                        _LOGGER.debug("Device %s already off — skipping", device)
 
         self.last_action_time = dt_util.utcnow()
 
     async def _reduce_charging_current(self, entity_id: str, overload_amps: float) -> float:
-        """Reduce charging current and return amount reduced.
-        
-        Reads min/max values from the entity attributes to determine valid range.
-        Works with any number entity (Tesla, Wallbox, etc.).
+        """Reduce charging current by the overload amount plus a 2 A safety margin.
+
+        Reads min/max/step from the entity's attributes — works with any EVSE
+        (Tesla, Wallbox, go-e, etc.) that exposes a number entity for charge current.
+        Returns the number of Amperes actually removed.
         """
         state = self.hass.states.get(entity_id)
         if not state:
-            _LOGGER.error(f"Charging entity {entity_id} not found")
-            return 0
-            
+            _LOGGER.error("Charging entity %s not found", entity_id)
+            return 0.0
         if state.state in ("unknown", "unavailable"):
-            _LOGGER.warning(f"Charging entity {entity_id} is {state.state}")
-            return 0
-        
+            _LOGGER.warning("Charging entity %s is %s", entity_id, state.state)
+            return 0.0
         try:
             current_value = float(state.state)
-        except (ValueError, TypeError) as e:
-            _LOGGER.error(f"Cannot parse charging current value '{state.state}': {e}")
-            return 0
-        
-        # Read min/max from entity attributes
-        min_value = state.attributes.get("min", 5)  # Default to 5 if not specified
-        max_value = state.attributes.get("max", 32)  # Default to 32 if not specified
-        step = state.attributes.get("step", 1)  # Default step of 1
-        
-        _LOGGER.debug(f"Charging entity {entity_id}: current={current_value}, min={min_value}, max={max_value}, step={step}")
-        
-        # Store original value if this is first reduction
+        except (ValueError, TypeError) as exc:
+            _LOGGER.error("Cannot parse charging value '%s': %s", state.state, exc)
+            return 0.0
+
+        min_value = float(state.attributes.get("min", 5))
+        max_value = float(state.attributes.get("max", 32))
+        step = float(state.attributes.get("step", 1))
+
+        _LOGGER.debug(
+            "Charger %s: current=%.1fA  min=%.1f  max=%.1f  step=%.1f",
+            entity_id, current_value, min_value, max_value, step,
+        )
+
+        # Store original value on first reduction so we know where to return to
         if self.charging_original_value is None:
             self.charging_original_value = current_value
-            _LOGGER.info(f"Storing original charging value: {current_value}A (range: {min_value}-{max_value}A)")
-        
-        # Calculate new value with margin
-        target_reduction = min(overload_amps + 2, current_value - min_value)  # +2A margin
-        new_value = max(min_value, current_value - target_reduction)
-        
-        # Round to step if specified
+            _LOGGER.info(
+                "Stored original charging value: %.1fA (range %.1f–%.1fA)",
+                current_value, min_value, max_value,
+            )
+
+        # Reduce by the overload plus a 2 A safety margin, but not below min
+        target_reduction = min(overload_amps + 2.0, current_value - min_value)
+        new_value = current_value - target_reduction
+
+        # Snap to step grid
         if step > 0:
             new_value = round(new_value / step) * step
-            new_value = max(min_value, min(max_value, new_value))
-        
+        new_value = max(min_value, min(max_value, new_value))
+
         if new_value < current_value:
-            _LOGGER.info(f"Attempting to reduce charging from {current_value}A to {new_value}A")
             try:
                 await self.hass.services.async_call(
                     "number",
@@ -250,50 +320,197 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                     {"entity_id": entity_id, "value": new_value},
                     blocking=True,
                 )
-                _LOGGER.info(f"✅ Successfully reduced charging to {new_value}A")
+                _LOGGER.info(
+                    "Charging reduced: %.1fA → %.1fA", current_value, new_value
+                )
                 return current_value - new_value
-            except Exception as e:
-                _LOGGER.error(f"Failed to set charging current: {e}")
-                return 0
+            except Exception as exc:
+                _LOGGER.error("Failed to set charging current: %s", exc)
+                return 0.0
         else:
-            _LOGGER.debug(f"Charging already at minimum or target: {current_value}A")
-        
-        return 0
+            _LOGGER.debug("Charging already at minimum (%.1fA)", current_value)
 
-    async def _restore_load(self) -> None:
-        """Restore charging current and devices after overload clears."""
-        _LOGGER.info("Overload cleared. Restoring load...")
-        
-        # Restore charging current gradually
+        return 0.0
+
+    # ── Cautious restoration ──────────────────────────────────────────────────
+
+    async def _maybe_restore_load(
+        self,
+        phase_currents: dict[int, float | None],
+        trigger_current: float,
+        enabled_phases: list[int],
+    ) -> None:
+        """Cautiously restore reduced load when there is sufficient stable headroom.
+
+        The restoration is gated by three conditions that must all be true:
+        1. Headroom across every enabled phase >= RESTORE_MIN_HEADROOM
+        2. That headroom has been continuously present for RESTORE_SETTLE_SECS
+        3. At least RESTORE_STEP_SECS have passed since the previous restoration step
+
+        When all three conditions are met, a single small step is taken (one charger
+        increment OR one device re-enabled) and the cycle restarts so the system can
+        observe the effect before the next step.
+        """
+        min_headroom = self._calculate_min_headroom(
+            phase_currents, trigger_current, enabled_phases
+        )
+
+        # ── Gate 1: Is there enough headroom at all? ──────────────────────────
+        if min_headroom < RESTORE_MIN_HEADROOM:
+            if self.restore_headroom_since is not None:
+                _LOGGER.debug(
+                    "Headroom %.1fA < %.1fA minimum — resetting settle timer",
+                    min_headroom, RESTORE_MIN_HEADROOM,
+                )
+                self.restore_headroom_since = None
+            return
+
+        # ── Gate 2: Has headroom been stable long enough? ─────────────────────
+        if self.restore_headroom_since is None:
+            self.restore_headroom_since = dt_util.utcnow()
+            _LOGGER.info(
+                "Headroom %.1fA detected — waiting %ds before restoring",
+                min_headroom, RESTORE_SETTLE_SECS,
+            )
+            return
+
+        settle_elapsed = (dt_util.utcnow() - self.restore_headroom_since).total_seconds()
+        if settle_elapsed < RESTORE_SETTLE_SECS:
+            _LOGGER.debug(
+                "Settle timer: %.0fs / %ds (headroom %.1fA)",
+                settle_elapsed, RESTORE_SETTLE_SECS, min_headroom,
+            )
+            return
+
+        # ── Gate 3: Has enough time passed since the last restore step? ───────
+        if self.last_restore_step_time is not None:
+            step_elapsed = (dt_util.utcnow() - self.last_restore_step_time).total_seconds()
+            if step_elapsed < RESTORE_STEP_SECS:
+                _LOGGER.debug(
+                    "Waiting %.0fs more before next restore step (headroom %.1fA)",
+                    RESTORE_STEP_SECS - step_elapsed, min_headroom,
+                )
+                return
+
+        # ── All gates passed: take one restoration step ───────────────────────
+        await self._restore_one_step(phase_currents, trigger_current, min_headroom)
+
+    async def _restore_one_step(
+        self,
+        phase_currents: dict[int, float | None],
+        trigger_current: float,
+        available_headroom: float,
+    ) -> None:
+        """Perform a single restoration step and update the step timer.
+
+        Priority order: charger first (precise, incremental), then devices.
+        A step is only taken if the headroom comfortably exceeds the amount that
+        step would add back to the load.
+        """
+        # ── 1. Try to increase charger by one step ────────────────────────────
         charging_entity = self.config.get(CONF_CHARGING_ENTITY)
         if charging_entity and self.charging_original_value is not None:
             state = self.hass.states.get(charging_entity)
             if state and state.state not in ("unknown", "unavailable"):
                 try:
                     current_value = float(state.state)
-                    step = state.attributes.get("step", 1)
-                    
-                    # Increase by 2A or 1 step at a time to avoid immediate re-overload
-                    increment = max(2, step)
-                    new_value = min(current_value + increment, self.charging_original_value)
-                    
-                    if new_value > current_value:
-                        await self.hass.services.async_call(
-                            "number",
-                            "set_value",
-                            {"entity_id": charging_entity, "value": new_value},
-                            blocking=True,
+                    step = float(state.attributes.get("step", 1))
+
+                    # Need headroom > step + safety margin to safely add one step
+                    needed = step + RESTORE_MIN_HEADROOM
+                    if available_headroom >= needed:
+                        target = min(current_value + step, self.charging_original_value)
+                        if target > current_value:
+                            await self.hass.services.async_call(
+                                "number",
+                                "set_value",
+                                {"entity_id": charging_entity, "value": target},
+                                blocking=True,
+                            )
+                            _LOGGER.info(
+                                "Restore: charging %.1fA → %.1fA (headroom was %.1fA)",
+                                current_value, target, available_headroom,
+                            )
+                            self.last_restore_step_time = dt_util.utcnow()
+
+                            if target >= self.charging_original_value:
+                                self.charging_original_value = None
+                                _LOGGER.info("Charging fully restored to original value")
+                            return
+                        else:
+                            # Already at or above original — clear tracking
+                            self.charging_original_value = None
+                    else:
+                        _LOGGER.info(
+                            "Headroom %.1fA is not enough to safely add %.1fA charger step "
+                            "(need %.1fA) — waiting",
+                            available_headroom, step, needed,
                         )
-                        _LOGGER.info(f"Increased charging current to {new_value}A")
-                    
-                    # Reset tracking if fully restored
-                    if new_value >= self.charging_original_value:
-                        self.charging_original_value = None
-                        
-                except (ValueError, TypeError):
-                    pass
-        
-        # Re-enable disabled devices
+                        return
+                except (ValueError, TypeError) as exc:
+                    _LOGGER.error("Error reading charger state during restore: %s", exc)
+
+        # ── 2. Try to re-enable one disabled device ───────────────────────────
+        if self.disabled_devices:
+            # We don't know exactly how much each device draws, so require at
+            # least RESTORE_MIN_HEADROOM as a conservative guard.
+            if available_headroom >= RESTORE_MIN_HEADROOM:
+                device = next(iter(self.disabled_devices))
+                try:
+                    await self.hass.services.async_call(
+                        "homeassistant",
+                        "turn_on",
+                        {"entity_id": device},
+                        blocking=True,
+                    )
+                    self.disabled_devices.discard(device)
+                    _LOGGER.info(
+                        "Restore: re-enabled device %s (headroom was %.1fA)",
+                        device, available_headroom,
+                    )
+                    self.last_restore_step_time = dt_util.utcnow()
+                    return
+                except Exception as exc:
+                    _LOGGER.error("Failed to restore device %s: %s", device, exc)
+            else:
+                _LOGGER.info(
+                    "Headroom %.1fA too low to safely re-enable a device — waiting",
+                    available_headroom,
+                )
+                return
+
+        # ── 3. Everything is restored ─────────────────────────────────────────
+        self.is_managing_load = False
+        self.restore_headroom_since = None
+        self.last_restore_step_time = None
+        _LOGGER.info("All load restored — returning to monitoring mode")
+
+    # ── Immediate (forced) restore — called when the switch is turned off ─────
+
+    async def _force_restore_load(self) -> None:
+        """Immediately restore all load without waiting for headroom checks.
+
+        Used when the user disables the integration via the switch entity.
+        """
+        _LOGGER.info("Load balancing disabled — forcing immediate restore")
+
+        charging_entity = self.config.get(CONF_CHARGING_ENTITY)
+        if charging_entity and self.charging_original_value is not None:
+            state = self.hass.states.get(charging_entity)
+            if state and state.state not in ("unknown", "unavailable"):
+                try:
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": charging_entity, "value": self.charging_original_value},
+                        blocking=True,
+                    )
+                    _LOGGER.info(
+                        "Charging restored to %.1fA", self.charging_original_value
+                    )
+                except Exception as exc:
+                    _LOGGER.error("Failed to restore charging current: %s", exc)
+
         for device in list(self.disabled_devices):
             try:
                 await self.hass.services.async_call(
@@ -302,9 +519,14 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
                     {"entity_id": device},
                     blocking=True,
                 )
-                _LOGGER.info(f"Restored device: {device}")
-            except Exception as e:
-                _LOGGER.error(f"Failed to restore device {device}: {e}")
-        
+                _LOGGER.info("Restored device: %s", device)
+            except Exception as exc:
+                _LOGGER.error("Failed to restore device %s: %s", device, exc)
+
+        # Clear all state
+        self.charging_original_value = None
         self.disabled_devices.clear()
-        self.last_action_time = dt_util.utcnow()
+        self.is_managing_load = False
+        self.restore_headroom_since = None
+        self.last_restore_step_time = None
+        self.last_action_time = None

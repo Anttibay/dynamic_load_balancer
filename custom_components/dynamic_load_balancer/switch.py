@@ -23,7 +23,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Dynamic Load Balancer switch."""
     coordinator: LoadBalancerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
     async_add_entities([LoadBalancerSwitch(coordinator, entry)])
 
 
@@ -51,15 +50,32 @@ class LoadBalancerSwitch(CoordinatorEntity, SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         data = self.coordinator.data or {}
-        
+
         phase_currents = data.get("phase_currents", {})
         phase_info = {}
         for phase, current in phase_currents.items():
             if current is not None:
                 phase_info[f"phase_{phase}_current"] = round(current, 2)
-        
+
         overloaded = data.get("sustained_overloads", [])
-        
+        charging_original = data.get("charging_original_value")
+        disabled_devices = data.get("disabled_devices", [])
+        restore_headroom_since = data.get("restore_headroom_since")
+        last_restore_step = data.get("last_restore_step_time")
+
+        # Derive a human-readable status
+        if overloaded:
+            status = "Overload — reducing load"
+        elif charging_original is not None or disabled_devices:
+            if restore_headroom_since is not None:
+                status = "Settling — waiting to restore"
+            elif last_restore_step is not None:
+                status = "Restoring — waiting between steps"
+            else:
+                status = "Waiting for headroom"
+        else:
+            status = "Monitoring"
+
         return {
             **phase_info,
             "fuse_size": data.get("fuse_size"),
@@ -67,9 +83,10 @@ class LoadBalancerSwitch(CoordinatorEntity, SwitchEntity):
             "is_managing_load": data.get("is_managing", False),
             "overloaded_phases": data.get("overloaded_phases", []),
             "sustained_overloads": overloaded,
-            "charging_original_value": data.get("charging_original_value"),
-            "disabled_devices": data.get("disabled_devices", []),
-            "status": "Managing load" if overloaded else "Monitoring",
+            "charging_original_value": charging_original,
+            "disabled_devices": disabled_devices,
+            "restoring": charging_original is not None or bool(disabled_devices),
+            "status": status,
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -83,7 +100,7 @@ class LoadBalancerSwitch(CoordinatorEntity, SwitchEntity):
         """Turn off load balancing."""
         self._enabled = False
         self.coordinator.enabled = False
-        # Restore all devices when disabled
-        await self.coordinator._restore_load()
+        # Immediately restore everything — no headroom checks needed
+        await self.coordinator._force_restore_load()
         self.async_write_ha_state()
         _LOGGER.info("Load balancing disabled")
