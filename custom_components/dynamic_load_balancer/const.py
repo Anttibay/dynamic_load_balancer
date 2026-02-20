@@ -12,6 +12,7 @@ CONF_AGGRESSIVENESS = "aggressiveness"
 CONF_SPIKE_FILTER_TIME = "spike_filter_time"
 CONF_CHARGING_ENTITY = "charging_entity"
 CONF_DEVICES_TO_TOGGLE = "devices_to_toggle"
+CONF_NOTIFY_ENABLED = "notify_enabled"
 CONF_NOTIFY_TARGET = "notify_target"
 
 # Default values
@@ -19,6 +20,7 @@ DEFAULT_FUSE_SIZE = 25
 DEFAULT_AGGRESSIVENESS = "medium"
 DEFAULT_SPIKE_FILTER_TIME = 30  # seconds
 DEFAULT_ENABLED_PHASES = ["1", "2", "3"]
+DEFAULT_NOTIFY_ENABLED = True
 
 # Aggressiveness levels (percentage of fuse capacity to trigger at)
 AGGRESSIVENESS_LEVELS = {

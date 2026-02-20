@@ -17,11 +17,13 @@ from .const import (
     CONF_DEVICES_TO_TOGGLE,
     CONF_ENABLED_PHASES,
     CONF_FUSE_SIZE,
+    CONF_NOTIFY_ENABLED,
     CONF_NOTIFY_TARGET,
     CONF_PHASE_1_SENSOR,
     CONF_PHASE_2_SENSOR,
     CONF_PHASE_3_SENSOR,
     CONF_SPIKE_FILTER_TIME,
+    DEFAULT_NOTIFY_ENABLED,
     DOMAIN,
 )
 
@@ -237,7 +239,14 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         trigger_current: float,
         peak_current: float,
     ) -> None:
-        """Send an overload notification via persistent_notification and optionally a mobile device."""
+        """Send an overload notification via persistent_notification and optionally a mobile device.
+
+        Both notification channels are skipped when notify_enabled is False.
+        """
+        if not self.config.get(CONF_NOTIFY_ENABLED, DEFAULT_NOTIFY_ENABLED):
+            _LOGGER.debug("Notifications disabled — skipping overload alert")
+            return
+
         fuse_size = self.config[CONF_FUSE_SIZE]
 
         # Build a readable phase summary, e.g. "L1: 24.3 A, L2: 23.1 A"
