@@ -1,4 +1,4 @@
-"""Dynamic Load Balancer Integration for Home Assistant."""
+"""Dynamic Load Balancer Integration for Home Assistant by Anttibay."""
 from __future__ import annotations
 
 import logging
