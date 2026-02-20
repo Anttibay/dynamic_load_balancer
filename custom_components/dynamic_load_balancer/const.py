@@ -24,6 +24,7 @@ DEFAULT_NOTIFY_ENABLED = True
 
 # Aggressiveness levels (percentage of fuse capacity to trigger at)
 AGGRESSIVENESS_LEVELS = {
+    "very_low": 1.00, # Trigger at 100% capacity (at the fuse limit itself)
     "low": 0.95,      # Trigger at 95% capacity
     "medium": 0.90,   # Trigger at 90% capacity
     "high": 0.85,     # Trigger at 85% capacity

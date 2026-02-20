@@ -136,6 +136,7 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
+                            {"value": "very_low", "label": "Very Low (100% capacity)"},
                             {"value": "low", "label": "Low (95% capacity)"},
                             {"value": "medium", "label": "Medium (90% capacity)"},
                             {"value": "high", "label": "High (85% capacity)"},
@@ -165,6 +166,7 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "fuse_size": str(fuse),
+                "very_low_trigger": str(round(fuse * 1.00, 1)),
                 "low_trigger": str(round(fuse * 0.95, 1)),
                 "medium_trigger": str(round(fuse * 0.90, 1)),
                 "high_trigger": str(round(fuse * 0.85, 1)),
@@ -259,6 +261,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=[
+                            {"value": "very_low", "label": "Very Low (100% capacity)"},
                             {"value": "low", "label": "Low (95% capacity)"},
                             {"value": "medium", "label": "Medium (90% capacity)"},
                             {"value": "high", "label": "High (85% capacity)"},
