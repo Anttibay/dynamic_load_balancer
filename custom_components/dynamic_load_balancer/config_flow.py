@@ -8,9 +8,10 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.helpers import selector
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    DeviceSelector,
+    DeviceSelectorConfig,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -19,19 +20,7 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
-    TextSelector,
-    TextSelectorConfig,
-    TextSelectorType,
 )
-
-# NotifySelector was added in HA 2024.8 — fall back to a text field on older versions
-try:
-    from homeassistant.helpers.selector import NotifySelector as _NotifySelector
-    def _notify_selector():
-        return _NotifySelector()
-except ImportError:
-    def _notify_selector():  # type: ignore[misc]
-        return TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT))
 
 from .const import (
     CONF_AGGRESSIVENESS,
@@ -114,7 +103,7 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Required(
                     CONF_ENABLED_PHASES, default=DEFAULT_ENABLED_PHASES
-                ): selector.SelectSelector(
+                ): SelectSelector(
                     SelectSelectorConfig(
                         options=["1", "2", "3"],
                         multiple=True,
@@ -215,7 +204,7 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_NOTIFY_ENABLED, default=DEFAULT_NOTIFY_ENABLED
                 ): BooleanSelector(),
-                vol.Optional(CONF_NOTIFY_TARGET): _notify_selector(),
+                vol.Optional(CONF_NOTIFY_TARGET): DeviceSelector(DeviceSelectorConfig(integration="mobile_app")),
             }
         )
 
@@ -297,7 +286,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_NOTIFY_TARGET,
                     default=current.get(CONF_NOTIFY_TARGET),
-                ): _notify_selector(),
+                ): DeviceSelector(DeviceSelectorConfig(integration="mobile_app")),
             }
         )
 

@@ -280,23 +280,68 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         except Exception as exc:
             _LOGGER.error("Failed to create persistent notification: %s", exc)
 
-        # 2. Optionally send to a configured mobile device
-        notify_target = self.config.get(CONF_NOTIFY_TARGET, "").strip()
-        if notify_target:
-            # Accept both "mobile_app_phone" and "notify.mobile_app_phone"
-            service = notify_target.removeprefix("notify.")
-            try:
-                await self.hass.services.async_call(
-                    "notify",
-                    service,
-                    {"title": title, "message": message},
-                    blocking=False,
+        # 2. Optionally send to a configured mobile device (stored as device_id)
+        device_id = self.config.get(CONF_NOTIFY_TARGET) or ""
+        if device_id:
+            service = await self._resolve_mobile_notify_service(device_id)
+            if service:
+                if not self.hass.services.has_service("notify", service):
+                    _LOGGER.warning(
+                        "Notify service 'notify.%s' not registered — "
+                        "open the HA companion app on the device once to activate it",
+                        service,
+                    )
+                else:
+                    try:
+                        await self.hass.services.async_call(
+                            "notify",
+                            service,
+                            {"title": title, "message": message},
+                            blocking=False,
+                        )
+                        _LOGGER.info("Overload notification sent to notify.%s", service)
+                    except Exception as exc:
+                        _LOGGER.error(
+                            "Failed to send notification to notify.%s: %s", service, exc
+                        )
+            else:
+                _LOGGER.warning(
+                    "Could not resolve notify service for device_id '%s'", device_id
                 )
-                _LOGGER.info("Overload notification sent to notify.%s", service)
-            except Exception as exc:
-                _LOGGER.error(
-                    "Failed to send notification to notify.%s: %s", service, exc
-                )
+
+    async def _resolve_mobile_notify_service(self, device_id: str) -> str | None:
+        """Map a mobile_app device_id to its notify service name.
+
+        First tries the mobile_app push registration data (most accurate).
+        Falls back to slugifying the device registry name.
+        """
+        from homeassistant.util import slugify  # local import — always available
+
+        # Primary: look up via mobile_app push registrations
+        try:
+            push_regs = (
+                self.hass.data
+                .get("mobile_app", {})
+                .get("push_registrations", {})
+            )
+            for _, reg in push_regs.items():
+                if reg.get("device_id") == device_id:
+                    name = reg.get("device_name", "")
+                    if name:
+                        return f"mobile_app_{slugify(name)}"
+        except Exception:
+            pass
+
+        # Fallback: slugify the HA device registry entry name
+        try:
+            from homeassistant.helpers import device_registry as dr
+            device = dr.async_get(self.hass).async_get(device_id)
+            if device and device.name:
+                return f"mobile_app_{slugify(device.name)}"
+        except Exception:
+            pass
+
+        return None
 
     # ── Load reduction ────────────────────────────────────────────────────────
 

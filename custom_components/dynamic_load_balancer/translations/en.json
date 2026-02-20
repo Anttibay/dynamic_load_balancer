@@ -46,13 +46,13 @@
           "charging_entity": "EV / Charging Current Control",
           "devices_to_toggle": "Devices to Turn Off During Overload",
           "notify_enabled": "Enable Notifications",
-          "notify_target": "Notification Device (phone)"
+          "notify_target": "Notification Device (mobile)"
         },
         "data_description": {
           "charging_entity": "A `number` entity that sets the charging current in Amperes. Works with any EVSE that exposes a current-control number entity (Tesla, Wallbox, go-e, etc.).",
           "devices_to_toggle": "These entities will be turned off when reducing charging current is not enough. Restored automatically once all phases are back below the threshold.",
           "notify_enabled": "When enabled, an overload alert is posted to the Home Assistant notification centre (bell icon) and optionally to your phone. Turn off to suppress all overload notifications.",
-          "notify_target": "Choose your phone or tablet from the list. Only devices with the Home Assistant companion app installed appear here. Leave blank for dashboard-only notifications."
+          "notify_target": "Select your phone or tablet from the list. Only devices with the Home Assistant companion app installed and push notifications registered will appear. Leave unset for dashboard-only notifications."
         }
       }
     }
@@ -74,7 +74,7 @@
           "aggressiveness": "Higher aggressiveness triggers load reduction earlier (lower threshold).",
           "spike_filter_time": "Seconds the overload must persist before any action is taken.",
           "notify_enabled": "Toggle all overload notifications on or off.",
-          "notify_target": "Choose your phone or tablet from the list to receive push notifications when an overload is detected."
+          "notify_target": "Select your mobile device to receive push notifications. Only devices with the HA companion app appear here."
         }
       }
     }
