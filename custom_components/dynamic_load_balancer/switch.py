@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -41,6 +42,12 @@ class LoadBalancerSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         self._attr_unique_id = f"{entry.entry_id}_load_balancer_switch"
         self._attr_icon = "mdi:transmission-tower"
         self._enabled = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Dynamic Load Balancer",
+            manufacturer="Custom Integration",
+            model="Electrical Load Balancer",
+        )
 
     async def async_added_to_hass(self) -> None:
         """Restore the last known state after a restart."""
