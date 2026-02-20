@@ -288,7 +288,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): BooleanSelector(),
                 vol.Optional(
                     CONF_NOTIFY_TARGET,
-                    default=current.get(CONF_NOTIFY_TARGET),
+                    description={"suggested_value": current.get(CONF_NOTIFY_TARGET)},
                 ): DeviceSelector(DeviceSelectorConfig(integration="mobile_app")),
             }
         )
