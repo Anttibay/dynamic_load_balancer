@@ -2,6 +2,10 @@
   <img src="logo.svg" alt="Dynamic Load Balancer" width="120"/>
   <h1>Dynamic Load Balancer</h1>
   <p>A Home Assistant custom integration that prevents electrical overloads in residential three-phase power systems by automatically throttling EV chargers and toggling high-power devices when a phase exceeds its fuse capacity.</p>
+
+  <a href="https://www.buymeacoffee.com/anttibay" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"/>
+  </a>
 </div>
 
 ---
@@ -44,6 +48,7 @@ After setup you can adjust fuse size, aggressiveness, spike filter, and notifica
 
 | Level | Trigger threshold | Example (25 A fuse) |
 |---|---|---|
+| Very Low | 100 % of fuse | 25.0 A |
 | Low | 95 % of fuse | 23.75 A |
 | Medium (default) | 90 % of fuse | 22.5 A |
 | High | 85 % of fuse | 21.25 A |
@@ -51,12 +56,7 @@ After setup you can adjust fuse size, aggressiveness, spike filter, and notifica
 
 ## Notifications
 
-When an overload is detected the integration always creates a **persistent notification** visible in the Home Assistant dashboard (bell icon). To also receive a **push notification on your phone**, enter your mobile device's notify service name during setup or in the options dialog.
-
-**Finding your device name:**
-1. Go to Developer Tools → Services
-2. Search for `notify.` — you will see entries like `notify.mobile_app_johns_iphone`
-3. Copy the part after `notify.` (e.g. `mobile_app_johns_iphone`) and enter it in the setup
+When an overload is detected the integration always creates a **persistent notification** visible in the Home Assistant dashboard (bell icon). To also receive a **push notification on your phone**, select your mobile device during setup or in the options dialog — only devices with the Home Assistant companion app installed will appear.
 
 ## Entities Created
 
@@ -78,7 +78,16 @@ This prevents the oscillation (reduce → restore → overload → repeat) commo
 
 ## Requirements
 
-- Home Assistant 2023.x or newer
+- Home Assistant 2024.1 or newer
 - At least one current sensor per phase (e.g. Shelly EM, Eastron SDM, smart meter integration)
 - Optional: an EVSE that exposes a charging-current `number` entity
 - Optional: a mobile device with the Home Assistant companion app installed
+
+---
+
+<div align="center">
+  <p>If this integration saves your fuse — consider buying me a coffee ☕</p>
+  <a href="https://www.buymeacoffee.com/anttibay" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"/>
+  </a>
+</div>
