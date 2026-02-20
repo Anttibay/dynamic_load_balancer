@@ -625,53 +625,64 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         if charging_entity and self.charging_original_value is not None:
             state = self.hass.states.get(charging_entity)
             if not state or state.state in ("unknown", "unavailable"):
-                # Charger is offline — do not proceed to device restoration either;
-                # we might otherwise re-enable a device we can't account for.
+                # Charger is offline (car disconnected, EVSE unreachable, etc.).
+                # It is no longer drawing current, so holding charging_original_value
+                # set forever would keep is_managing_load = True and suppress all
+                # future notifications. Release the tracking and fall through to
+                # device restoration / step 3.
                 _LOGGER.warning(
-                    "Charger %s is unavailable during restoration — pausing this step",
+                    "Charger %s is unavailable during restoration — "
+                    "releasing charger tracking and continuing",
                     charging_entity,
                 )
-                return
-            try:
-                current_value = float(state.state)
+                self.charging_original_value = None
+            else:
                 try:
-                    step = float(state.attributes.get("step", 1))
-                except (ValueError, TypeError):
-                    step = 1.0
+                    current_value = float(state.state)
+                    try:
+                        step = float(state.attributes.get("step", 1))
+                    except (ValueError, TypeError):
+                        step = 1.0
 
-                # Need headroom > step + safety margin to safely add one step
-                needed = step + restore_headroom
-                if available_headroom >= needed:
-                    target = min(current_value + step, self.charging_original_value)
-                    if target > current_value:
-                        await self.hass.services.async_call(
-                            "number",
-                            "set_value",
-                            {"entity_id": charging_entity, "value": target},
-                            blocking=True,
-                        )
-                        _LOGGER.info(
-                            "Restore: charging %.1fA → %.1fA (headroom was %.1fA)",
-                            current_value, target, available_headroom,
-                        )
-                        self.last_restore_step_time = dt_util.utcnow()
+                    # Need headroom > step + safety margin to safely add one step
+                    needed = step + restore_headroom
+                    if available_headroom >= needed:
+                        target = min(current_value + step, self.charging_original_value)
+                        if target > current_value:
+                            await self.hass.services.async_call(
+                                "number",
+                                "set_value",
+                                {"entity_id": charging_entity, "value": target},
+                                blocking=True,
+                            )
+                            _LOGGER.info(
+                                "Restore: charging %.1fA → %.1fA (headroom was %.1fA)",
+                                current_value, target, available_headroom,
+                            )
+                            self.last_restore_step_time = dt_util.utcnow()
 
-                        if target >= self.charging_original_value:
+                            if target >= self.charging_original_value:
+                                self.charging_original_value = None
+                                _LOGGER.info("Charging fully restored to original value")
+                            return
+                        else:
+                            # Already at or above original — clear tracking
                             self.charging_original_value = None
-                            _LOGGER.info("Charging fully restored to original value")
-                        return
                     else:
-                        # Already at or above original — clear tracking
+                        # Not enough headroom to safely add another step.
+                        # Accept the current charger level as the safe operating point
+                        # and release tracking so the system can return to monitoring
+                        # mode. Keeping charging_original_value set indefinitely would
+                        # keep is_managing_load = True forever and suppress notifications.
+                        _LOGGER.info(
+                            "Headroom %.1fA is not enough to safely add %.1fA charger "
+                            "step (need %.1fA) — accepting current level as restored",
+                            available_headroom, step, needed,
+                        )
                         self.charging_original_value = None
-                else:
-                    _LOGGER.info(
-                        "Headroom %.1fA is not enough to safely add %.1fA charger step "
-                        "(need %.1fA) — waiting",
-                        available_headroom, step, needed,
-                    )
-                    return
-            except (ValueError, TypeError) as exc:
-                _LOGGER.error("Error reading charger state during restore: %s", exc)
+                        # Fall through to device restoration / step 3
+                except (ValueError, TypeError) as exc:
+                    _LOGGER.error("Error reading charger state during restore: %s", exc)
 
         # ── 2. Try to re-enable one disabled device ───────────────────────────
         if self.disabled_devices:
