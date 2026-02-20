@@ -13,14 +13,25 @@ from homeassistant.helpers.selector import (
     BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
-    NotifySelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
+
+# NotifySelector was added in HA 2024.8 — fall back to a text field on older versions
+try:
+    from homeassistant.helpers.selector import NotifySelector as _NotifySelector
+    def _notify_selector():
+        return __notify_selector()
+except ImportError:
+    def _notify_selector():  # type: ignore[misc]
+        return TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT))
 
 from .const import (
     CONF_AGGRESSIVENESS,
@@ -204,7 +215,7 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_NOTIFY_ENABLED, default=DEFAULT_NOTIFY_ENABLED
                 ): BooleanSelector(),
-                vol.Optional(CONF_NOTIFY_TARGET): NotifySelector(),
+                vol.Optional(CONF_NOTIFY_TARGET): _notify_selector(),
             }
         )
 
@@ -286,7 +297,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_NOTIFY_TARGET,
                     default=current.get(CONF_NOTIFY_TARGET),
-                ): NotifySelector(),
+                ): _notify_selector(),
             }
         )
 
