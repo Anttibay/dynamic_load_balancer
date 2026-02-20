@@ -29,14 +29,16 @@
       },
       "behavior": {
         "title": "Reaction Behavior",
-        "description": "Control **when** and **how quickly** the load balancer reacts to overloads.\n\n**Aggressiveness** sets the trigger threshold as a percentage of your fuse capacity:\n- **Very Low (100%)** — triggers at {very_low_trigger} A — acts only when the fuse limit is actually reached\n- **Low (95%)** — triggers at {low_trigger} A — acts only when very close to the limit\n- **Medium (90%)** — triggers at {medium_trigger} A — balanced, recommended for most homes\n- **High (85%)** — triggers at {high_trigger} A — acts early, gives more headroom\n- **Very High (80%)** — triggers at {very_high_trigger} A — most conservative, most protective\n\n**Spike Filter** prevents the balancer from reacting to short-lived current spikes (e.g. motor startups, microwave ovens). The overload must be sustained for at least this many seconds before any action is taken. Recommended: 20–30 s.",
+        "description": "Control **when** and **how quickly** the load balancer reacts to overloads.\n\n**Aggressiveness** sets the trigger threshold as a percentage of your fuse capacity:\n- **Very Low (100%)** — triggers at {very_low_trigger} A — acts only when the fuse limit is actually reached\n- **Low (95%)** — triggers at {low_trigger} A — acts only when very close to the limit\n- **Medium (90%)** — triggers at {medium_trigger} A — balanced, recommended for most homes\n- **High (85%)** — triggers at {high_trigger} A — acts early, gives more headroom\n- **Very High (80%)** — triggers at {very_high_trigger} A — most conservative, most protective\n\n**Spike Filter** prevents the balancer from reacting to short-lived current spikes (e.g. motor startups, microwave ovens). The overload must be sustained for at least this many seconds before any action is taken. Recommended: 20–30 s.\n\n**Restore Headroom** is the minimum free capacity (in Amperes) that must be available on all monitored phases before the balancer starts gradually restoring EV current or re-enabling toggled devices.",
         "data": {
           "aggressiveness": "Aggressiveness",
-          "spike_filter_time": "Spike Filter Duration (seconds)"
+          "spike_filter_time": "Spike Filter Duration (seconds)",
+          "restore_headroom": "Restore Headroom (A)"
         },
         "data_description": {
           "aggressiveness": "Higher aggressiveness = lower trigger threshold = earlier intervention = more safety margin.",
-          "spike_filter_time": "Minimum number of seconds a phase must remain overloaded before any load-reduction action is triggered. Prevents false reactions to momentary current spikes."
+          "spike_filter_time": "Minimum number of seconds a phase must remain overloaded before any load-reduction action is triggered. Prevents false reactions to momentary current spikes.",
+          "restore_headroom": "Minimum free capacity (trigger threshold minus measured current) that must be present on all monitored phases before any load is restored. Default: 3 A. Increase for a more conservative safety buffer; decrease if your loads are stable and you want faster restoration."
         }
       },
       "actions": {
@@ -66,6 +68,7 @@
           "fuse_size": "Per-Phase Fuse / Breaker Size (A)",
           "aggressiveness": "Aggressiveness",
           "spike_filter_time": "Spike Filter Duration (seconds)",
+          "restore_headroom": "Restore Headroom (A)",
           "notify_enabled": "Enable Notifications",
           "notify_target": "Notification Device (phone)"
         },
@@ -73,6 +76,7 @@
           "fuse_size": "The ampere rating of your per-phase circuit breaker.",
           "aggressiveness": "Higher aggressiveness triggers load reduction earlier (lower threshold).",
           "spike_filter_time": "Seconds the overload must persist before any action is taken.",
+          "restore_headroom": "Minimum free capacity (trigger threshold minus measured current) required on all monitored phases before any load is restored. Default: 3 A.",
           "notify_enabled": "Toggle all overload notifications on or off.",
           "notify_target": "Select your mobile device to receive push notifications. Only devices with the HA companion app appear here."
         }

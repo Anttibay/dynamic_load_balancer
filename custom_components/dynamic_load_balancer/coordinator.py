@@ -22,16 +22,15 @@ from .const import (
     CONF_PHASE_1_SENSOR,
     CONF_PHASE_2_SENSOR,
     CONF_PHASE_3_SENSOR,
+    CONF_RESTORE_HEADROOM,
     CONF_SPIKE_FILTER_TIME,
+    DEFAULT_FUSE_SIZE,
     DEFAULT_NOTIFY_ENABLED,
+    DEFAULT_RESTORE_HEADROOM,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# How much headroom below the trigger threshold must exist before restoration begins.
-# e.g. if trigger is 22.5 A and this is 3.0, current must be <= 19.5 A on all phases.
-RESTORE_MIN_HEADROOM = 3.0   # Amperes
 
 # Headroom must be continuously observed for this many seconds before the first
 # restoration step is taken. Prevents restoring into a situation that just settled.
@@ -40,6 +39,13 @@ RESTORE_SETTLE_SECS = 60     # seconds
 # Minimum wait between consecutive restoration steps (charger increment or device
 # re-enable). Gives the system time to observe the effect of each step.
 RESTORE_STEP_SECS = 60       # seconds
+
+# Maps enabled-phase numbers to their sensor config keys
+_PHASE_SENSOR_KEY = {
+    1: CONF_PHASE_1_SENSOR,
+    2: CONF_PHASE_2_SENSOR,
+    3: CONF_PHASE_3_SENSOR,
+}
 
 
 class LoadBalancerCoordinator(DataUpdateCoordinator):
@@ -83,12 +89,56 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         """Fetch data from sensors and manage load."""
         phase_currents = await self._get_phase_currents()
 
-        fuse_size = self.config[CONF_FUSE_SIZE]
+        fuse_size = float(self.config.get(CONF_FUSE_SIZE, DEFAULT_FUSE_SIZE))
         aggressiveness = self.config.get(CONF_AGGRESSIVENESS, "medium")
-        threshold = AGGRESSIVENESS_LEVELS[aggressiveness]
+        threshold = AGGRESSIVENESS_LEVELS.get(aggressiveness)
+        if threshold is None:
+            _LOGGER.warning(
+                "Unknown aggressiveness value '%s' — falling back to 'medium'", aggressiveness
+            )
+            threshold = AGGRESSIVENESS_LEVELS["medium"]
         trigger_current = fuse_size * threshold
 
         enabled_phases = [int(p) for p in self.config.get(CONF_ENABLED_PHASES, ["1", "2", "3"])]
+
+        # ── Sensor availability guard ─────────────────────────────────────────
+        # If any enabled phase that has a sensor configured is returning None
+        # (unavailable / unknown / bad value), skip all load management for this
+        # cycle. Acting on incomplete data risks incorrect load reduction or
+        # premature restoration. Also reset stale overload timers for those phases.
+        unavailable_phases = [
+            phase
+            for phase in enabled_phases
+            if self.config.get(_PHASE_SENSOR_KEY.get(phase, ""))
+            and phase_currents.get(phase) is None
+        ]
+        if unavailable_phases:
+            for phase in unavailable_phases:
+                if self.overload_start.get(phase) is not None:
+                    _LOGGER.info(
+                        "Phase %d sensor became unavailable — resetting overload timer", phase
+                    )
+                    self.overload_start[phase] = None
+            _LOGGER.warning(
+                "Phase %s sensor(s) unavailable or invalid — "
+                "skipping load management this cycle",
+                unavailable_phases,
+            )
+            return {
+                "phase_currents": phase_currents,
+                "overloaded_phases": [],
+                "sustained_overloads": [],
+                "is_managing": self.is_managing_load,
+                "fuse_size": fuse_size,
+                "trigger_current": trigger_current,
+                "charging_original_value": self.charging_original_value,
+                "disabled_devices": list(self.disabled_devices),
+                "restore_headroom_since": self.restore_headroom_since,
+                "last_restore_step_time": self.last_restore_step_time,
+                "last_overloaded_phases": self.last_triggered_phases,
+                "last_peak_current": self.last_triggered_peak,
+                "trigger_current_at_event": self.last_triggered_threshold,
+            }
 
         # ── Phase overload detection ──────────────────────────────────────────
         overloaded_phases = []
@@ -247,7 +297,7 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Notifications disabled — skipping overload alert")
             return
 
-        fuse_size = self.config[CONF_FUSE_SIZE]
+        fuse_size = float(self.config.get(CONF_FUSE_SIZE, DEFAULT_FUSE_SIZE))
 
         # Build a readable phase summary, e.g. "L1: 24.3 A, L2: 23.1 A"
         phase_parts = []
@@ -427,9 +477,23 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Cannot parse charging value '%s': %s", state.state, exc)
             return 0.0
 
-        min_value = float(state.attributes.get("min", 5))
-        max_value = float(state.attributes.get("max", 32))
-        step = float(state.attributes.get("step", 1))
+        try:
+            min_value = float(state.attributes.get("min", 5))
+            max_value = float(state.attributes.get("max", 32))
+            step = float(state.attributes.get("step", 1))
+        except (ValueError, TypeError):
+            _LOGGER.warning(
+                "Cannot parse min/max/step attributes for %s — using defaults 5/32/1",
+                entity_id,
+            )
+            min_value, max_value, step = 5.0, 32.0, 1.0
+
+        if max_value <= min_value:
+            _LOGGER.error(
+                "Charger %s has invalid range: min=%.1f >= max=%.1f — skipping",
+                entity_id, min_value, max_value,
+            )
+            return 0.0
 
         _LOGGER.debug(
             "Charger %s: current=%.1fA  min=%.1f  max=%.1f  step=%.1f",
@@ -484,7 +548,7 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         """Cautiously restore reduced load when there is sufficient stable headroom.
 
         The restoration is gated by three conditions that must all be true:
-        1. Headroom across every enabled phase >= RESTORE_MIN_HEADROOM
+        1. Headroom across every enabled phase >= restore_headroom (user-configured)
         2. That headroom has been continuously present for RESTORE_SETTLE_SECS
         3. At least RESTORE_STEP_SECS have passed since the previous restoration step
 
@@ -492,16 +556,20 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         increment OR one device re-enabled) and the cycle restarts so the system can
         observe the effect before the next step.
         """
+        restore_headroom = float(
+            self.config.get(CONF_RESTORE_HEADROOM, DEFAULT_RESTORE_HEADROOM)
+        )
+
         min_headroom = self._calculate_min_headroom(
             phase_currents, trigger_current, enabled_phases
         )
 
         # ── Gate 1: Is there enough headroom at all? ──────────────────────────
-        if min_headroom < RESTORE_MIN_HEADROOM:
+        if min_headroom < restore_headroom:
             if self.restore_headroom_since is not None:
                 _LOGGER.debug(
                     "Headroom %.1fA < %.1fA minimum — resetting settle timer",
-                    min_headroom, RESTORE_MIN_HEADROOM,
+                    min_headroom, restore_headroom,
                 )
                 self.restore_headroom_since = None
             return
@@ -510,8 +578,8 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         if self.restore_headroom_since is None:
             self.restore_headroom_since = dt_util.utcnow()
             _LOGGER.info(
-                "Headroom %.1fA detected — waiting %ds before restoring",
-                min_headroom, RESTORE_SETTLE_SECS,
+                "Headroom %.1fA detected (need %.1fA) — waiting %ds before restoring",
+                min_headroom, restore_headroom, RESTORE_SETTLE_SECS,
             )
             return
 
@@ -548,54 +616,68 @@ class LoadBalancerCoordinator(DataUpdateCoordinator):
         A step is only taken if the headroom comfortably exceeds the amount that
         step would add back to the load.
         """
+        restore_headroom = float(
+            self.config.get(CONF_RESTORE_HEADROOM, DEFAULT_RESTORE_HEADROOM)
+        )
+
         # ── 1. Try to increase charger by one step ────────────────────────────
         charging_entity = self.config.get(CONF_CHARGING_ENTITY)
         if charging_entity and self.charging_original_value is not None:
             state = self.hass.states.get(charging_entity)
-            if state and state.state not in ("unknown", "unavailable"):
+            if not state or state.state in ("unknown", "unavailable"):
+                # Charger is offline — do not proceed to device restoration either;
+                # we might otherwise re-enable a device we can't account for.
+                _LOGGER.warning(
+                    "Charger %s is unavailable during restoration — pausing this step",
+                    charging_entity,
+                )
+                return
+            try:
+                current_value = float(state.state)
                 try:
-                    current_value = float(state.state)
                     step = float(state.attributes.get("step", 1))
+                except (ValueError, TypeError):
+                    step = 1.0
 
-                    # Need headroom > step + safety margin to safely add one step
-                    needed = step + RESTORE_MIN_HEADROOM
-                    if available_headroom >= needed:
-                        target = min(current_value + step, self.charging_original_value)
-                        if target > current_value:
-                            await self.hass.services.async_call(
-                                "number",
-                                "set_value",
-                                {"entity_id": charging_entity, "value": target},
-                                blocking=True,
-                            )
-                            _LOGGER.info(
-                                "Restore: charging %.1fA → %.1fA (headroom was %.1fA)",
-                                current_value, target, available_headroom,
-                            )
-                            self.last_restore_step_time = dt_util.utcnow()
-
-                            if target >= self.charging_original_value:
-                                self.charging_original_value = None
-                                _LOGGER.info("Charging fully restored to original value")
-                            return
-                        else:
-                            # Already at or above original — clear tracking
-                            self.charging_original_value = None
-                    else:
-                        _LOGGER.info(
-                            "Headroom %.1fA is not enough to safely add %.1fA charger step "
-                            "(need %.1fA) — waiting",
-                            available_headroom, step, needed,
+                # Need headroom > step + safety margin to safely add one step
+                needed = step + restore_headroom
+                if available_headroom >= needed:
+                    target = min(current_value + step, self.charging_original_value)
+                    if target > current_value:
+                        await self.hass.services.async_call(
+                            "number",
+                            "set_value",
+                            {"entity_id": charging_entity, "value": target},
+                            blocking=True,
                         )
+                        _LOGGER.info(
+                            "Restore: charging %.1fA → %.1fA (headroom was %.1fA)",
+                            current_value, target, available_headroom,
+                        )
+                        self.last_restore_step_time = dt_util.utcnow()
+
+                        if target >= self.charging_original_value:
+                            self.charging_original_value = None
+                            _LOGGER.info("Charging fully restored to original value")
                         return
-                except (ValueError, TypeError) as exc:
-                    _LOGGER.error("Error reading charger state during restore: %s", exc)
+                    else:
+                        # Already at or above original — clear tracking
+                        self.charging_original_value = None
+                else:
+                    _LOGGER.info(
+                        "Headroom %.1fA is not enough to safely add %.1fA charger step "
+                        "(need %.1fA) — waiting",
+                        available_headroom, step, needed,
+                    )
+                    return
+            except (ValueError, TypeError) as exc:
+                _LOGGER.error("Error reading charger state during restore: %s", exc)
 
         # ── 2. Try to re-enable one disabled device ───────────────────────────
         if self.disabled_devices:
             # We don't know exactly how much each device draws, so require at
-            # least RESTORE_MIN_HEADROOM as a conservative guard.
-            if available_headroom >= RESTORE_MIN_HEADROOM:
+            # least restore_headroom as a conservative guard.
+            if available_headroom >= restore_headroom:
                 device = next(iter(self.disabled_devices))
                 try:
                     await self.hass.services.async_call(

@@ -14,6 +14,7 @@ CONF_CHARGING_ENTITY = "charging_entity"
 CONF_DEVICES_TO_TOGGLE = "devices_to_toggle"
 CONF_NOTIFY_ENABLED = "notify_enabled"
 CONF_NOTIFY_TARGET = "notify_target"
+CONF_RESTORE_HEADROOM = "restore_headroom"
 
 # Default values
 DEFAULT_FUSE_SIZE = 25
@@ -21,6 +22,7 @@ DEFAULT_AGGRESSIVENESS = "medium"
 DEFAULT_SPIKE_FILTER_TIME = 30  # seconds
 DEFAULT_ENABLED_PHASES = ["1", "2", "3"]
 DEFAULT_NOTIFY_ENABLED = True
+DEFAULT_RESTORE_HEADROOM = 3.0  # Amperes of free capacity required before restoration
 
 # Aggressiveness levels (percentage of fuse capacity to trigger at)
 AGGRESSIVENESS_LEVELS = {

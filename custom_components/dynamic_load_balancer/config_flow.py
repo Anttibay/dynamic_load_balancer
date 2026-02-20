@@ -33,11 +33,13 @@ from .const import (
     CONF_PHASE_1_SENSOR,
     CONF_PHASE_2_SENSOR,
     CONF_PHASE_3_SENSOR,
+    CONF_RESTORE_HEADROOM,
     CONF_SPIKE_FILTER_TIME,
     DEFAULT_AGGRESSIVENESS,
     DEFAULT_ENABLED_PHASES,
     DEFAULT_FUSE_SIZE,
     DEFAULT_NOTIFY_ENABLED,
+    DEFAULT_RESTORE_HEADROOM,
     DEFAULT_SPIKE_FILTER_TIME,
     DOMAIN,
 )
@@ -153,6 +155,17 @@ class DynamicLoadBalancerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         max=300,
                         step=5,
                         unit_of_measurement="seconds",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_RESTORE_HEADROOM, default=DEFAULT_RESTORE_HEADROOM
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1.0,
+                        max=15.0,
+                        step=0.5,
+                        unit_of_measurement="A",
                         mode=NumberSelectorMode.BOX,
                     )
                 ),
@@ -279,6 +292,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         max=300,
                         step=5,
                         unit_of_measurement="seconds",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_RESTORE_HEADROOM,
+                    default=current.get(CONF_RESTORE_HEADROOM, DEFAULT_RESTORE_HEADROOM),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=1.0,
+                        max=15.0,
+                        step=0.5,
+                        unit_of_measurement="A",
                         mode=NumberSelectorMode.BOX,
                     )
                 ),
