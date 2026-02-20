@@ -28,7 +28,7 @@ from homeassistant.helpers.selector import (
 try:
     from homeassistant.helpers.selector import NotifySelector as _NotifySelector
     def _notify_selector():
-        return __notify_selector()
+        return _NotifySelector()
 except ImportError:
     def _notify_selector():  # type: ignore[misc]
         return TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT))
