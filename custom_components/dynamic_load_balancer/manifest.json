@@ -1,11 +1,10 @@
 {
   "domain": "dynamic_load_balancer",
   "name": "Dynamic Load Balancer",
-  "codeowners": [],
+  "codeowners": ["@anttibay"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/yourusername/dynamic_load_balancer",
-  "homeassistant": "2024.1.0",
+  "documentation": "https://github.com/anttibay/dynamic_load_balancer",
   "integration_type": "device",
   "iot_class": "calculated",
   "requirements": [],
