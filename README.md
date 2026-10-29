@@ -192,6 +192,10 @@ pip install -r requirements_test.txt
 pytest
 ```
 
+## License
+
+Released under the [MIT License](LICENSE).
+
 ---
 
 <div align="center">
