@@ -192,6 +192,8 @@ pip install -r requirements_test.txt
 pytest
 ```
 
+To release: bump `version` in `manifest.json`, add a matching section to `CHANGELOG.md`, then run **Actions → Release → Run workflow**. HACS offers the new GitHub release as an update.
+
 ## License
 
 Released under the [MIT License](LICENSE).

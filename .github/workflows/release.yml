@@ -1,0 +1,57 @@
+name: Release
+
+# Run from Actions → Release → Run workflow after bumping "version" in
+# manifest.json. Creates the vX.Y.Z tag and GitHub release (which is what
+# HACS offers as an update), using that version's section of CHANGELOG.md
+# as release notes.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v4"
+
+      - name: Read version from manifest
+        id: version
+        run: |
+          version="$(jq -r .version custom_components/dynamic_load_balancer/manifest.json)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Check the release does not exist yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::Release $TAG already exists. Bump the version in manifest.json first."
+            exit 1
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v version="$VERSION" '
+            /^## / { if (found) exit; found = ($2 == version || $2 == "v" version || $2 == "[" version "]") ; next }
+            found
+          ' CHANGELOG.md > release_notes.md
+          cat release_notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if [ -s release_notes.md ]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file release_notes.md
+          else
+            echo "::warning::No CHANGELOG.md section for $TAG; using generated notes."
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+          fi
