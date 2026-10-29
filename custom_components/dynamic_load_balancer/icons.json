@@ -1,0 +1,80 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "overload": {
+        "default": "mdi:flash-outline",
+        "state": {
+          "on": "mdi:flash-alert"
+        }
+      },
+      "load_reduced": {
+        "default": "mdi:power-plug-outline",
+        "state": {
+          "on": "mdi:power-plug-off-outline"
+        }
+      }
+    },
+    "button": {
+      "restore_load": {
+        "default": "mdi:restore"
+      }
+    },
+    "number": {
+      "fuse_size": {
+        "default": "mdi:fuse"
+      },
+      "spike_filter_time": {
+        "default": "mdi:timer-sand"
+      },
+      "restore_headroom": {
+        "default": "mdi:arrow-expand-vertical"
+      }
+    },
+    "select": {
+      "aggressiveness": {
+        "default": "mdi:speedometer"
+      }
+    },
+    "sensor": {
+      "status": {
+        "default": "mdi:transmission-tower",
+        "state": {
+          "monitoring": "mdi:check-circle-outline",
+          "overload_pending": "mdi:flash-outline",
+          "reducing": "mdi:flash-alert",
+          "waiting_headroom": "mdi:timer-sand",
+          "settling": "mdi:timer-sand-complete",
+          "restoring": "mdi:restore",
+          "disabled": "mdi:transmission-tower-off",
+          "sensor_unavailable": "mdi:alert-circle-outline"
+        }
+      },
+      "headroom": {
+        "default": "mdi:gauge"
+      },
+      "trigger_current": {
+        "default": "mdi:current-ac"
+      },
+      "overload_count": {
+        "default": "mdi:counter"
+      },
+      "last_triggered": {
+        "default": "mdi:clock-alert-outline"
+      }
+    },
+    "switch": {
+      "load_balancer_switch": {
+        "default": "mdi:transmission-tower",
+        "state": {
+          "off": "mdi:transmission-tower-off"
+        }
+      },
+      "notifications": {
+        "default": "mdi:bell",
+        "state": {
+          "off": "mdi:bell-off"
+        }
+      }
+    }
+  }
+}

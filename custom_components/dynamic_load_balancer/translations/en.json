@@ -21,15 +21,15 @@
           "enabled_phases": "Monitor These Phases"
         },
         "data_description": {
-          "phase_1_sensor": "A sensor entity whose state is the current draw in Amperes for phase L1.",
-          "phase_2_sensor": "A sensor entity whose state is the current draw in Amperes for phase L2.",
-          "phase_3_sensor": "A sensor entity whose state is the current draw in Amperes for phase L3.",
-          "enabled_phases": "Select which phases should trigger load-reduction actions. Deselect a phase if you have no sensor for it, or if you want to monitor it passively without taking action."
+          "phase_1_sensor": "A sensor entity whose state is the current draw in Amperes (or mA) for phase L1.",
+          "phase_2_sensor": "A sensor entity whose state is the current draw in Amperes (or mA) for phase L2.",
+          "phase_3_sensor": "A sensor entity whose state is the current draw in Amperes (or mA) for phase L3.",
+          "enabled_phases": "Select which phases should trigger load-reduction actions. Phases without a sensor are ignored."
         }
       },
       "behavior": {
         "title": "Reaction Behavior",
-        "description": "Control **when** and **how quickly** the load balancer reacts to overloads.\n\n**Aggressiveness** sets the trigger threshold as a percentage of your fuse capacity:\n- **Very Low (100%)** — triggers at {very_low_trigger} A — acts only when the fuse limit is actually reached\n- **Low (95%)** — triggers at {low_trigger} A — acts only when very close to the limit\n- **Medium (90%)** — triggers at {medium_trigger} A — balanced, recommended for most homes\n- **High (85%)** — triggers at {high_trigger} A — acts early, gives more headroom\n- **Very High (80%)** — triggers at {very_high_trigger} A — most conservative, most protective\n\n**Spike Filter** prevents the balancer from reacting to short-lived current spikes (e.g. motor startups, microwave ovens). The overload must be sustained for at least this many seconds before any action is taken. Recommended: 20–30 s.\n\n**Restore Headroom** is the minimum free capacity (in Amperes) that must be available on all monitored phases before the balancer starts gradually restoring EV current or re-enabling toggled devices.",
+        "description": "Control **when** and **how quickly** the load balancer reacts to overloads.\n\n**Aggressiveness** sets the trigger threshold as a percentage of your {fuse_size} A fuse:\n- **Very Low (100%)** — triggers at {very_low_trigger} A — acts only when the fuse limit is actually reached\n- **Low (95%)** — triggers at {low_trigger} A — acts only when very close to the limit\n- **Medium (90%)** — triggers at {medium_trigger} A — balanced, recommended for most homes\n- **High (85%)** — triggers at {high_trigger} A — acts early, gives more headroom\n- **Very High (80%)** — triggers at {very_high_trigger} A — most conservative, most protective\n\n**Spike Filter** prevents the balancer from reacting to short-lived current spikes (e.g. motor startups, microwave ovens). The overload must be sustained for at least this many seconds before any action is taken. Recommended: 20–30 s.\n\n**Restore Headroom** is the minimum free capacity (in Amperes) that must be available on all monitored phases before the balancer starts gradually restoring EV current or re-enabling toggled devices.",
         "data": {
           "aggressiveness": "Aggressiveness",
           "spike_filter_time": "Spike Filter Duration (seconds)",
@@ -43,7 +43,7 @@
       },
       "actions": {
         "title": "Load Reduction & Notifications",
-        "description": "Define what happens when a sustained overload is detected.\n\n**EV / Charging Control:** Select a `number` entity that controls charging current. The integration steps it down during overload and gradually restores it once load is clear.\n\n**Devices to Toggle Off:** Turned off if throttling the charger alone is not enough. Restored automatically when the overload clears.\n\n**Notifications:** When enabled, an alert appears in the HA dashboard (bell icon). Select your phone from the **Notification Device** dropdown to also receive a push notification.",
+        "description": "Define what happens when a sustained overload is detected.\n\n**EV / Charging Control:** Select a `number` entity that controls charging current. The integration steps it down during overload and gradually restores it once load is clear.\n\n**Devices to Toggle Off:** Turned off, in the order listed, if throttling the charger alone is not enough. Restored automatically when the overload clears.\n\n**Notifications:** When enabled, an alert appears in the HA dashboard (bell icon). Select your phone from the **Notification Device** dropdown to also receive a push notification.\n\nEverything can be changed later via **Configure**, which also offers restore priority, timing and other advanced settings.",
         "data": {
           "charging_entity": "EV / Charging Current Control",
           "devices_to_toggle": "Devices to Turn Off During Overload",
@@ -52,34 +52,204 @@
         },
         "data_description": {
           "charging_entity": "A `number` entity that sets the charging current in Amperes. Works with any EVSE that exposes a current-control number entity (Tesla, Wallbox, go-e, etc.).",
-          "devices_to_toggle": "These entities will be turned off when reducing charging current is not enough. Restored automatically once all phases are back below the threshold.",
+          "devices_to_toggle": "Switches, climate units, water heaters, fans or input booleans. Turned off in the order listed when reducing charging current is not enough, and turned back on in reverse order (climate and water heaters return to their previous mode).",
           "notify_enabled": "When enabled, an overload alert is posted to the Home Assistant notification centre (bell icon) and optionally to your phone. Turn off to suppress all overload notifications.",
           "notify_target": "Select your phone or tablet from the list. Only devices with the Home Assistant companion app installed and push notifications registered will appear. Leave unset for dashboard-only notifications."
         }
       }
+    },
+    "error": {
+      "duplicate_sensor": "The same sensor is assigned to more than one phase.",
+      "no_monitored_phase": "Assign a sensor to at least one phase and tick that phase under Monitor These Phases."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Update Load Balancer Settings",
-        "description": "Adjust parameters without re-running the full setup wizard. Sensor and device assignments can only be changed by removing and re-adding the integration.",
+        "title": "Load Balancer Settings",
+        "description": "Choose which group of settings to change. Changes take effect immediately — any reduction or restoration in progress continues.",
+        "menu_options": {
+          "thresholds": "Fuse size & reaction thresholds",
+          "sensors": "Current sensors",
+          "load_control": "EV charger & devices",
+          "notifications": "Notifications",
+          "advanced": "Advanced timing"
+        }
+      },
+      "thresholds": {
+        "title": "Fuse Size & Reaction Thresholds",
+        "description": "With the current {fuse_size} A fuse the aggressiveness levels trigger at: Very Low {very_low_trigger} A · Low {low_trigger} A · Medium {medium_trigger} A · High {high_trigger} A · Very High {very_high_trigger} A.",
         "data": {
           "fuse_size": "Per-Phase Fuse / Breaker Size (A)",
           "aggressiveness": "Aggressiveness",
           "spike_filter_time": "Spike Filter Duration (seconds)",
-          "restore_headroom": "Restore Headroom (A)",
-          "notify_enabled": "Enable Notifications",
-          "notify_target": "Notification Device (phone)"
+          "restore_headroom": "Restore Headroom (A)"
         },
         "data_description": {
           "fuse_size": "The ampere rating of your per-phase circuit breaker.",
           "aggressiveness": "Higher aggressiveness triggers load reduction earlier (lower threshold).",
           "spike_filter_time": "Seconds the overload must persist before any action is taken.",
-          "restore_headroom": "Minimum free capacity (trigger threshold minus measured current) required on all monitored phases before any load is restored. Default: 3 A.",
-          "notify_enabled": "Toggle all overload notifications on or off.",
-          "notify_target": "Select your mobile device to receive push notifications. Only devices with the HA companion app appear here."
+          "restore_headroom": "Minimum free capacity (trigger threshold minus measured current) required on all monitored phases before any load is restored. Default: 3 A."
         }
+      },
+      "sensors": {
+        "title": "Current Sensors",
+        "description": "Assign a current sensor (A or mA) to each phase and choose which phases are monitored.",
+        "data": {
+          "phase_1_sensor": "Phase 1 — Current Sensor",
+          "phase_2_sensor": "Phase 2 — Current Sensor",
+          "phase_3_sensor": "Phase 3 — Current Sensor",
+          "enabled_phases": "Monitor These Phases"
+        },
+        "data_description": {
+          "phase_1_sensor": "Current draw for phase L1. Clear the field to remove it.",
+          "phase_2_sensor": "Current draw for phase L2. Clear the field to remove it.",
+          "phase_3_sensor": "Current draw for phase L3. Clear the field to remove it.",
+          "enabled_phases": "Only ticked phases with a sensor trigger load reduction."
+        }
+      },
+      "load_control": {
+        "title": "EV Charger & Devices",
+        "description": "What gets reduced during an overload, and in which order it comes back. Load that is currently reduced is still restored if you remove it here.",
+        "data": {
+          "charging_entity": "EV / Charging Current Control",
+          "devices_to_toggle": "Devices to Turn Off During Overload",
+          "device_load": "Estimated Load per Device (A)",
+          "restore_priority": "Restore Priority"
+        },
+        "data_description": {
+          "charging_entity": "A `number` (or `input_number`) entity that sets the charging current in Amperes. Reduced first, because it can be adjusted in small steps.",
+          "devices_to_toggle": "Turned off in the order listed when reducing the charger is not enough; turned back on in reverse order.",
+          "device_load": "How many Amperes one device is assumed to draw. Used to decide how many devices to turn off at once, and how much headroom (this value plus Restore Headroom) is needed before a device is turned back on. Set it to roughly the per-phase current of your largest device.",
+          "restore_priority": "Which load comes back first once there is room. The other waits until the first is fully restored."
+        }
+      },
+      "notifications": {
+        "title": "Notifications",
+        "data": {
+          "notify_enabled": "Enable Notifications",
+          "notify_target": "Notification Device (phone)",
+          "notify_on_restore": "Notify When Load Is Restored"
+        },
+        "data_description": {
+          "notify_enabled": "Toggle all notifications on or off. An overload alert is posted to the Home Assistant notification centre (bell icon) and optionally to your phone.",
+          "notify_target": "Select your mobile device to receive push notifications. Only devices with the HA companion app appear here. Clear the field for dashboard-only notifications.",
+          "notify_on_restore": "Also send a message when the overload is over and all reduced load is back. On your phone it replaces the overload alert."
+        }
+      },
+      "advanced": {
+        "title": "Advanced Timing",
+        "description": "Fine-tune the control loop. The defaults suit most homes.",
+        "data": {
+          "restore_settle_time": "Settle Time Before Restoring (s)",
+          "restore_step_time": "Time Between Restore Steps (s)",
+          "reduction_interval": "Time Between Reduction Actions (s)",
+          "charger_margin": "Extra Charger Reduction (A)"
+        },
+        "data_description": {
+          "restore_settle_time": "Headroom must be continuously available this long before the first restore step. Default: 60 s.",
+          "restore_step_time": "Wait between restore steps (one charger step or one device), giving each step time to show its effect. Default: 60 s.",
+          "reduction_interval": "Minimum time between load-reduction actions during an overload, so the charger has time to react before more is cut. Default: 10 s.",
+          "charger_margin": "Amperes removed from the charger on top of the measured overload, for a safety buffer. Default: 2 A."
+        }
+      }
+    },
+    "error": {
+      "duplicate_sensor": "The same sensor is assigned to more than one phase.",
+      "no_monitored_phase": "Assign a sensor to at least one phase and tick that phase under Monitor These Phases."
+    }
+  },
+  "selector": {
+    "aggressiveness": {
+      "options": {
+        "very_low": "Very Low (100% of fuse)",
+        "low": "Low (95% of fuse)",
+        "medium": "Medium (90% of fuse)",
+        "high": "High (85% of fuse)",
+        "very_high": "Very High (80% of fuse)"
+      }
+    },
+    "phases": {
+      "options": {
+        "1": "Phase 1 (L1)",
+        "2": "Phase 2 (L2)",
+        "3": "Phase 3 (L3)"
+      }
+    },
+    "restore_priority": {
+      "options": {
+        "charger_first": "EV charger first, then devices",
+        "devices_first": "Devices first, then EV charger"
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "overload": {
+        "name": "Overload"
+      },
+      "load_reduced": {
+        "name": "Load reduced"
+      }
+    },
+    "button": {
+      "restore_load": {
+        "name": "Restore load now"
+      }
+    },
+    "number": {
+      "fuse_size": {
+        "name": "Fuse size"
+      },
+      "spike_filter_time": {
+        "name": "Spike filter"
+      },
+      "restore_headroom": {
+        "name": "Restore headroom"
+      }
+    },
+    "select": {
+      "aggressiveness": {
+        "name": "Aggressiveness",
+        "state": {
+          "very_low": "Very low (100%)",
+          "low": "Low (95%)",
+          "medium": "Medium (90%)",
+          "high": "High (85%)",
+          "very_high": "Very high (80%)"
+        }
+      }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "monitoring": "Monitoring",
+          "overload_pending": "Overload detected — filtering spikes",
+          "reducing": "Overload — reducing load",
+          "waiting_headroom": "Waiting for headroom",
+          "settling": "Settling — waiting to restore",
+          "restoring": "Restoring",
+          "disabled": "Disabled",
+          "sensor_unavailable": "Sensor unavailable"
+        }
+      },
+      "headroom": {
+        "name": "Available headroom"
+      },
+      "trigger_current": {
+        "name": "Trigger threshold"
+      },
+      "overload_count": {
+        "name": "Overload events"
+      },
+      "last_triggered": {
+        "name": "Last overload"
+      }
+    },
+    "switch": {
+      "notifications": {
+        "name": "Notifications"
       }
     }
   }
